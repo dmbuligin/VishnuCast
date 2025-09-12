@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background_light">
+
+    <!-- Toolbar -->
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/toolbar_about"
+        android:layout_width="0dp"
+        android:layout_height="?attr/actionBarSize"
+        android:background="@color/blue_600"
+        app:contentInsetStartWithNavigation="0dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <ImageView
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:src="@drawable/logo_toolbar"
+            android:adjustViewBounds="true"
+            android:scaleType="fitCenter"
+            android:contentDescription="@string/app_name" />
+
+        <TextView
+            android:id="@+id/toolbar_title_about"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:text="@string/menu_about"
+            android:textColor="@android:color/white"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+    </androidx.appcompat.widget.Toolbar>
+
+    <!-- Прокручиваемый контент -->
+    <ScrollView
+        android:id="@+id/about_scroll"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:padding="16dp"
+        app:layout_constraintTop_toBottomOf="@id/toolbar_about"
+        app:layout_constraintBottom_toTopOf="@id/about_footer"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- Заголовок VishnuCast -->
+            <TextView
+                android:id="@+id/about_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/app_name"
+                android:textColor="@color/text_primary"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:paddingBottom="8dp"
+                android:textAlignment="center"
+                android:gravity="center_horizontal" />
+
+            <!-- Строка версии -->
+            <TextView
+                android:id="@+id/about_version_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_secondary"
+                android:textSize="16sp"
+                android:textAlignment="center"
+                android:gravity="center_horizontal" />
+
+            <!-- Номер сборки и время -->
+            <TextView
+                android:id="@+id/about_build_info"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_secondary"
+                android:textSize="16sp"
+                android:paddingBottom="12dp"
+                android:textAlignment="center"
+                android:gravity="center_horizontal" />
+
+            <!-- Основной текст About -->
+            <TextView
+                android:id="@+id/about_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/about_text"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:lineSpacingExtra="4dp"
+                android:autoLink="web"
+                android:linksClickable="true"
+                android:textColorLink="@color/blue_600"
+                android:paddingBottom="16dp" />
+
+            <!-- Респект Гуру -->
+            <TextView
+                android:id="@+id/about_respect"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/about_respect"
+                android:textColor="@color/text_primary"
+                android:gravity="center_horizontal"
+                android:textSize="16sp"
+                android:textStyle="italic"
+                android:autoLink="web"
+                android:linksClickable="true"
+                android:textColorLink="@color/blue_600"
+                android:paddingBottom="24dp" />
+
+
+
+        </LinearLayout>
+
+    </ScrollView>
+
+    <!-- Футер всегда внизу -->
+    <TextView
+        android:id="@+id/about_footer"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="@string/about_footer"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp"
+        android:textStyle="italic"
+        android:gravity="center_horizontal"
+        android:lineSpacingExtra="2dp"
+        android:autoLink="web"
+        android:linksClickable="true"
+        android:textColorLink="@color/blue_600"
+        android:padding="8dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+
+</androidx.constraintlayout.widget.ConstraintLayout>

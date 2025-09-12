@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Status -->
+    <string name="status_running">VishnuCast: работает</string>
+    <string name="status_stopped">VishnuCast: остановлено</string>
+    <string name="status_need_mic_perm">Нужно разрешение на микрофон</string>
+    <string name="permission_denied">Доступ к микрофону отклонён</string>
+
+    <!-- Buttons -->
+    <string name="btn_start">Старт трансляции</string>
+    <string name="btn_stop">Стоп</string>
+
+    <!-- Hints -->
+    <string name="hint_open_url">Откройте %1$s</string>
+    <string name="placeholder_url">http://&lt;IP&gt;:8080</string>
+    <string name="ip_fmt">IP: %1$s</string>
+    <string name="ip_unknown">неизвестно</string>
+
+    <!-- Menu -->
+    <string name="menu_language">Язык</string>
+    <string name="menu_about">О приложении</string>
+
+    <!-- Language dialog -->
+    <string name="lang_title">Выберите язык</string>
+    <string name="lang_ru">Русский</string>
+    <string name="lang_en">English</string>
+
+    <!-- About -->
+    <string name="about_title">О VishnuCast</string>
+    <string name="about_text">
+    VishnuCast — лёгкий мобильный WebRTC-кастер аудио со встроенным HTTP/WebSocket-сервером и минимальным веб-клиентом.\nПростая и удобная альтернатива радиомикрофону для лекторов или эксурсоводов.
+</string>
+    <string name="about_respect">Создано в знак глубокого уважения к моему Гуру Вишну Шаран Шукла\nhttps://yogasanskar.ru/</string>
+    <string name="about_footer"> Project by Mr. Dima, with AI collaboration\nhttps://github.com/dmbuligin</string>
+    <string name="about_version_fmt">Версия: %1$s (код %2$d)\nСборка: %3$s @ %4$s</string>
+    <string name="menu_share">Поделиться ссылкой</string>
+    <string name="share_chooser_title">Поделиться ссылкой</string>
+    <string name="share_no_url">IP ещё не получен</string>
+    <string name="action_open_hotspot_settings">Открыть настройки хот-спота</string>
+    <string name="action_share_link">Поделиться ссылкой</string>
+    <string name="share_link_not_ready">Ссылка ещё не готова</string>
+    <!-- <string name="version_fmt">Версия %1$s</string> -->
+    <string name="version_build_fmt">Версия: %1$s (сборка %2$d)</string>
+    <string name="version_build_time_fmt">Версия: %1$s (сборка %2$d, %3$s)</string>
+    <string name="version_fmt">Версия %1$s</string>
+    <string name="build_info_fmt">сборка %1$d @ %2$s</string>
+    <!-- Count -->
+    <string name="clients_connected_fmt">Подключено клиентов: %1$d</string>
+    <string name="menu_settings">Настройки</string>
+
+    <string name="pref_input_source_title">Источник микрофона</string>
+    <string name="settings_input_source_desc">Выберите, какой микрофон использовать для трансляции.</string>
+
+    <string-array name="pref_input_source_entries">
+        <item>Авто</item>
+        <item>USB-микрофон</item>
+        <item>Гарнитура (джек)</item>
+        <item>Bluetooth</item>
+        <item>Встроенный микрофон</item>
+    </string-array>
+
+    <string-array name="pref_input_source_values">
+        <item>AUTO</item>
+        <item>USB</item>
+        <item>WIRED</item>
+        <item>BT</item>
+        <item>BUILTIN</item>
+    </string-array>
+
+
+</resources>

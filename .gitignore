@@ -1,0 +1,30 @@
+# Gradle
+.gradle/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+build/
+
+# Android/Studio
+local.properties
+/.idea/
+!.idea/codeStyles
+!.idea/inspectionProfiles
+!.idea/runConfigurations
+captures/
+.externalNativeBuild/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# APK / AAB / native
+*.apk
+*.aab
+*.so
+
+# Misс
+/notes.md
+/todo.md

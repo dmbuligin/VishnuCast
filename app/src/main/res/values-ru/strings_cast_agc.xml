@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_title">Настройки</string>
+    <string name="settings_agc">Автоподстройка усиления (AGC)</string>
+    <string name="settings_agc_desc">Позволить WebRTC автоматически повышать уровень микрофона</string>
+</resources>

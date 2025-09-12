@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_title">Settings</string>
+    <string name="settings_agc">Automatic gain control (AGC)</string>
+    <string name="settings_agc_desc">Let WebRTC automatically amplify microphone level</string>
+</resources>
