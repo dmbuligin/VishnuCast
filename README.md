@@ -37,7 +37,7 @@ A simple and convenient alternative to a radio microphone for lecturers or tour 
 ### Build from source
 
 ```bash
-git clone https://github.com/username/VishnuCast.git
+git clone https://github.com/dmbuligin/VishnuCast.git
 ```
 
 * Open in **Android Studio** (compileSdk = 36, targetSdk = 34).
@@ -112,8 +112,7 @@ RU
 ### Сборка из исходников
 
 ```bash
-git clone https://github.com/username/VishnuCast.git
-cd VishnuCast
+git clone https://github.com/dmbuligin/VishnuCast.git
 ```
 
 * Откройте проект в **Android Studio** (compileSdk = 36, targetSdk = 34).
