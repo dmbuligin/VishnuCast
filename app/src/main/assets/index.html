@@ -1,43 +1,72 @@
 <!doctype html>
 <html lang="ru">
-  <head>
+<head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
     <meta name="theme-color" content="#111827"/>
     <title>VishnuCast</title>
+    <!-- favicon: без ведущего слэша -->
     <link rel="icon" href="favicon.png" type="image/png" sizes="64x64">
     <link rel="apple-touch-icon" href="apple-touch-icon.png" sizes="180x180">
     <style>
-      :root{--bg:#0b1220;--card:#111827;--muted:#6b7280;--text:#e5e7eb;}
-      html,body{height:100%;}
-      body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,'Helvetica Neue',Arial,'Noto Sans',sans-serif;line-height:1.4;display:flex;align-items:center;justify-content:center;padding:24px;}
-      .card{width:min(560px,100%);background:var(--card);border-radius:20px;padding:20px 18px 16px;box-shadow:0 10px 30px rgba(0,0,0,.35);}
-      h1{margin:0 0 8px;font-size:22px;letter-spacing:.2px}
-      .row{display:flex;gap:12px;align-items:center;justify-content:flex-start;margin:8px 0 8px}
-      .btn{flex:1;appearance:none;border:0;border-radius:14px;padding:16px 18px;font-size:16px;font-weight:600;background:#2563eb;color:white}
-      .btn:disabled{opacity:.6}
-      .status-text{margin:10px 0 0;color:var(--muted);font-size:13px}
-      audio{display:none}
+        :root{--bg:#0b1220;--card:#111827;--muted:#6b7280;--text:#e5e7eb;}
+        html,body{height:100%;}
+        body{
+          margin:0;background:var(--bg);color:var(--text);
+          font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,'Helvetica Neue',Arial,'Noto Sans',sans-serif;
+          line-height:1.4;display:flex;align-items:center;justify-content:center;padding:24px;
+        }
+        .card{
+          width:min(560px,100%);
+          background:var(--card);
+          border-radius:20px;
+          padding:20px 18px 16px;
+          box-shadow:0 10px 30px rgba(0,0,0,.35);
+        }
+        h1{margin:0 0 8px;font-size:22px;letter-spacing:.2px}
+        .row{display:flex;gap:12px;align-items:center;justify-content:flex-start;margin:8px 0 8px}
+        .btn{
+          flex:1;
+          appearance:none;border:0;border-radius:14px;
+          padding:22px 18px;     /* ↑ было 16px 18px → увеличили только по вертикали */
+          font-size:16px;        /* размер шрифта прежний */
+          font-weight:600;
+          background:#2563eb;
+          color:white
+        }
+        .btn:disabled{opacity:.6}
+        .status-text{margin:10px 0 0;color:var(--muted);font-size:13px}
+        audio{display:none}
+
+        .lang{
+          display:flex;gap:8px;align-items:center;margin:0 0 6px
+        }
+        .lang button{
+          appearance:none;border:0;border-radius:12px;
+          padding:6px 10px;font-size:13px;font-weight:600;
+          background:#223049;color:#e5e7eb;cursor:pointer
+        }
+        .lang button[aria-current="true"]{background:#2563eb;color:#fff}
     </style>
-  </head>
-  <body>
-    <main class="card">
-      <h1>VishnuCast</h1>
+</head>
+<body>
+<main class="card">
+    <h1>VishnuCast</h1>
 
-      <div class="row">
+    <div class="lang" aria-label="Language">
+        <button id="lang-ru" type="button" aria-current="true">RU</button>
+        <button id="lang-en" type="button">EN</button>
+    </div>
+
+    <div class="row">
         <button id="btn" class="btn">Подключить звук</button>
-      </div>
+    </div>
 
-      <p class="status-text" id="status">Статус: не подключено</p>
+    <p class="status-text" id="status">Статус: не подключено</p>
 
-      <!-- Элемент аудио нужен для вывода потока; UI плеера не требуется -->
-      <audio id="audio" autoplay playsinline></audio>
-    </main>
+    <audio id="audio" autoplay playsinline></audio>
+</main>
 
-    <script src="/client.js"></script>
-    <script>
-      // Подстраховка: если CSS/JS не подгрузились полностью, пользователь увидит понятный статус
-      document.getElementById('status').textContent ||= 'не подключено';
-    </script>
-  </body>
+<script src="/client.js"></script>
+</body>
 </html>

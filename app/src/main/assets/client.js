@@ -1,4 +1,4 @@
-/* VishnuCast client — recv-only audio; single click handler; UI styles injected; no meter */
+/* VishnuCast client — recv-only audio; single click handler; UI styles injected; no meter; RU/EN i18n */
 (function () {
   'use strict';
 
@@ -34,6 +34,8 @@
   var btn = $('#btn');
   var statusEl = $('#status');
   var audioEl = $('#audio');
+  var langRuBtn = $('#lang-ru');
+  var langEnBtn = $('#lang-en');
 
   if (!btn) {
     btn = document.createElement('button');
@@ -57,7 +59,82 @@
   audioEl.setAttribute('playsinline', '');
   audioEl.style.display = 'none';
 
-  function setStatus(t) { statusEl.textContent = 'Статус: ' + t; }
+  // ---------- i18n ----------
+  var LS_KEY = 'vishnucast.lang';
+  var TEXTS = {
+    ru: {
+      btn_connect: 'Подключить звук',
+      btn_disconnect: 'Отключить',
+      connecting: 'Подключение…',
+      connected: 'Подключено',
+      disconnected: 'Отключено',
+      ws_closed: 'Сигналинг закрыт',
+      err: 'Ошибка',
+      status_prefix: 'Статус: '
+    },
+    en: {
+      btn_connect: 'Connect audio',
+      btn_disconnect: 'Disconnect',
+      connecting: 'Connecting…',
+      connected: 'Connected',
+      disconnected: 'Disconnected',
+      ws_closed: 'Signaling closed',
+      err: 'Error',
+      status_prefix: 'Status: '
+    }
+  };
+
+  function detectInitialLang() {
+    try {
+      var saved = localStorage.getItem(LS_KEY);
+      if (saved === 'ru' || saved === 'en') return saved;
+    } catch(_) {}
+    var nav = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
+    return nav.indexOf('ru') === 0 ? 'ru' : 'en';
+  }
+
+  var currentLang = detectInitialLang();
+  var texts = TEXTS[currentLang];
+
+  function applyLangToUi() {
+    try {
+      // Кнопка
+      if (state === 'connected') btn.textContent = texts.btn_disconnect;
+      else if (state === 'connecting') btn.textContent = texts.connecting;
+      else btn.textContent = texts.btn_connect;
+
+      // Статус (оставляем только префикс; конкретное значение обновляется через setStatus)
+      if (statusEl && typeof statusEl.textContent === 'string') {
+        var suffix = statusEl.textContent.split(':').slice(1).join(':').trim();
+        if (!suffix) suffix = (state === 'connected' ? texts.connected :
+                               state === 'connecting' ? texts.connecting :
+                               texts.disconnected);
+        statusEl.textContent = texts.status_prefix + suffix;
+      }
+
+      // Подсветка активной кнопки языка
+      if (langRuBtn) langRuBtn.setAttribute('aria-current', String(currentLang === 'ru'));
+      if (langEnBtn) langEnBtn.setAttribute('aria-current', String(currentLang === 'en'));
+      // <html lang=...> (необязательно)
+      try { document.documentElement.lang = currentLang; } catch(_) {}
+    } catch(_) {}
+  }
+
+  function setLang(lang) {
+    currentLang = (lang === 'ru') ? 'ru' : 'en';
+    texts = TEXTS[currentLang];
+    try { localStorage.setItem(LS_KEY, currentLang); } catch(_) {}
+    applyLangToUi();
+  }
+
+  if (langRuBtn) langRuBtn.addEventListener('click', function(){ setLang('ru'); });
+  if (langEnBtn) langEnBtn.addEventListener('click', function(){ setLang('en'); });
+
+  // ---------- Status / Button helpers ----------
+  function setStatusTextCore(s) {
+    statusEl.textContent = texts.status_prefix + s;
+  }
+  function setStatus(s) { setStatusTextCore(s); }
   function enableBtn()  { btn.disabled = false; btn.style.pointerEvents = 'auto'; }
   function disableBtn() { btn.disabled = true; }
   function setBtnState(st){ btn.setAttribute('data-state', st); }
@@ -69,32 +146,6 @@
   var state = 'idle'; // idle | connecting | connected | error
   var userStopped = false;
   var pendingRemoteCandidates = [];
-
-  var texts = {
-    connect: 'Подключить',
-    disconnect: 'Отключить',
-    connecting: 'Подключение…',
-    connected: 'Подключено',
-    disconnected: 'Отключено',
-    ws_closed: 'Сигналинг закрыт',
-    err: 'Ошибка'
-  };
-
-  function setBtn() {
-    if (state === 'connecting') {
-      btn.textContent = texts.connecting;
-      setBtnState('connecting');
-      disableBtn(); // блокируем повторный клик
-    } else if (state === 'connected') {
-      btn.textContent = texts.disconnect;
-      setBtnState('connected');
-      enableBtn();
-    } else { // idle/error
-      btn.textContent = texts.connect;
-      setBtnState('idle');
-      enableBtn();
-    }
-  }
 
   // ---------- URL helpers ----------
   function buildWsPath() {
@@ -124,7 +175,7 @@
     state = 'idle';
     setBtn();
     setStatus(texts.disconnected);
-    log('Отключено');
+    log('Disconnected');
   }
   window.addEventListener('beforeunload', function () { stopAll(false); });
 
@@ -173,7 +224,23 @@
     }
   }
 
-  // ---------- Core connect ----------
+  // ---------- Core connect (НЕ МЕНЯЕМ ПРОТОКОЛ) ----------
+  function setBtn() {
+    if (state === 'connecting') {
+      btn.textContent = texts.connecting;
+      setBtnState('connecting');
+      disableBtn();
+    } else if (state === 'connected') {
+      btn.textContent = texts.btn_disconnect;
+      setBtnState('connected');
+      enableBtn();
+    } else { // idle/error
+      btn.textContent = texts.btn_connect;
+      setBtnState('idle');
+      enableBtn();
+    }
+  }
+
   function connectOnce() {
     if (state === 'connecting' || state === 'connected') return;
 
@@ -271,7 +338,10 @@
   });
 
   // ---------- Init ----------
-  setStatus(texts.disconnected);
+  // Установим язык (автодетект / сохранённый), применим к UI
+  setLang(currentLang);
+  // Для статуса — вывесим "disconnected"
+  setStatus(TEXTS[currentLang].disconnected);
   setBtn();
   enableBtn();
 
