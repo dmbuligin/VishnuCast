@@ -30,7 +30,7 @@ A simple and convenient alternative to a radio microphone for lecturers or tour 
 
 ### Install (APK)
 
-- Download the latest APK from [Releases](https://github.com/username/VishnuCast/releases).
+- Download the latest APK from [Releases](https://github.com/dmbuligin/VishnuCast/releases).
 - Allow installation from unknown sources (Android).
 - Launch the app, grant microphone access, start broadcasting.
 
