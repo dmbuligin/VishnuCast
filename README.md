@@ -69,6 +69,11 @@ This project is licensed under the [MIT License](LICENSE).
   <img src="docs/screen2.jpg" alt="Client page" width="250"/>
 </p>
 
+## Contributing
+
+Contributions are welcome!
+Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
 ### Credits
 
 Project by dmbuligin aka **Mr. Dima**, with AI collaboration.
@@ -136,6 +141,13 @@ git clone https://github.com/dmbuligin/VishnuCast.git
 ### Лицензия
 
 Проект распространяется под [лицензией MIT](LICENSE).
+
+
+## Участие в разработке
+
+Мы открыты для ваших идей и правок!
+Подробные правила смотрите в [CONTRIBUTING.md](CONTRIBUTING.md).
+
 
 ### Скриншоты
 
