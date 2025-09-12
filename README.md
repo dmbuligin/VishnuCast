@@ -103,7 +103,7 @@ RU
 
 ###### Установка (APK)
 
-* Скачайте последний релиз на вкладке [Releases](https://github.com/username/VishnuCast/releases).
+* Скачайте последний релиз на вкладке [Releases](https://github.com/dmbuligin/VishnuCast/releases).
 
 * Разрешите установку из неизвестных источников (Android).
 
