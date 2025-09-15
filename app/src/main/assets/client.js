@@ -7,8 +7,8 @@
     var css = [
       ':root{--vc-btn:#2563eb;--vc-btn-hover:#1d4ed8;--vc-btn-on:#16a34a;--vc-fg:#fff}',
       '#btn{appearance:none;-webkit-appearance:none;display:inline-flex;align-items:center;gap:8px;',
-      '  padding:16px 16px;border:none;border-radius:12px;background:var(--vc-btn);color:var(--vc-fg);',
-      '  font-weight:600;font-size:16px;line-height:1;user-select:none;cursor:pointer;',
+      '  border:none;border-radius:12px;background:var(--vc-btn);color:var(--vc-fg);',
+      '  font-weight:600;line-height:1;user-select:none;cursor:pointer;',
       '  box-shadow:0 1px 0 rgba(0,0,0,.05),0 6px 12px rgba(37,99,235,.25);',
       '  transition:transform .12s ease,box-shadow .2s ease,background-color .2s ease,opacity .2s ease;',
       '  -webkit-tap-highlight-color: rgba(0,0,0,.06)}',
