@@ -11,14 +11,13 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import android.Manifest
+import android.animation.ValueAnimator
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.media.AudioDeviceCallback
-import android.media.AudioDeviceInfo
-import android.media.AudioManager
+import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -27,13 +26,21 @@ import android.provider.Settings
 import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
+import android.view.ViewTreeObserver
+import android.view.animation.LinearInterpolator
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.graphics.drawable.DrawableCompat
 import androidx.core.view.ViewCompat
 import androidx.core.widget.TextViewCompat
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -45,6 +52,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_APP_LANG = "app_lang" // "ru" | "en"
     }
 
+    private lateinit var arrowHint: HintArrowView
     private lateinit var tvStatus: TextView
     private lateinit var tvHint: TextView
     private lateinit var tvIp: TextView
@@ -52,12 +60,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var ivQr: ImageView
     private lateinit var btnToggle: SeekBar
     private lateinit var levelBar: ProgressBar
+    private lateinit var sliderContainer: FrameLayout
+
+    // Foreground-стрелка
+    private var fgArrow: Drawable? = null
+    private var fgAnim: ValueAnimator? = null
 
     private val isRunning = AtomicBoolean(false)
     private var lastUrl: String? = null
     private var userIsTracking = false
 
-    // === ИКОНКА ИСТОЧНИКА (USB/встроенный) ===
+    // Аудио-индикация
     private lateinit var audioManager: AudioManager
     private val audioDeviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { updateInputBadge() }
@@ -75,29 +88,19 @@ class MainActivity : AppCompatActivity() {
         val icon = ContextCompat.getDrawable(this, iconRes)
         val size = dp(32)
         icon?.setBounds(0, 0, size, size)
-        tvStatus.setCompoundDrawables(icon, null, null, null)
+        TextViewCompat.setCompoundDrawablesRelative(tvStatus, icon, null, null, null)
         tvStatus.compoundDrawablePadding = dp(8)
-        TextViewCompat.setCompoundDrawableTintList(
-            tvStatus,
-            ColorStateList.valueOf(Color.parseColor("#6B7280"))
-        )
+        TextViewCompat.setCompoundDrawableTintList(tvStatus, ColorStateList.valueOf(Color.parseColor("#6B7280")))
     }
 
-    // RECORD_AUDIO
     private val requestRecordAudio =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (!granted) {
-                Toast.makeText(
-                    this,
-                    getString(R.string.permission_denied),
-                    Toast.LENGTH_SHORT
-                ).show()
-                // Откатить ползунок
+                Toast.makeText(this, getString(R.string.permission_denied), Toast.LENGTH_SHORT).show()
                 updateUiRunning(false)
             }
         }
 
-    // POST_NOTIFICATIONS (Android 13+, API 33)
     private val requestPostNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) startCastService() else {
@@ -119,49 +122,57 @@ class MainActivity : AppCompatActivity() {
         tvIp = findViewById(R.id.tvIp)
         tvClients = findViewById(R.id.tvClients)
         ivQr = findViewById(R.id.ivQr)
+        sliderContainer = findViewById(R.id.sliderContainer)
+        sliderContainer.foreground = null
+        sliderContainer.overlay.clear()
         btnToggle = findViewById(R.id.btnToggle)
+        arrowHint = findViewById(R.id.arrowHint)
         levelBar = findViewById(R.id.signalLevelBar)
 
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         updateInputBadge()
 
-        // Логика "свайп — старт/стоп"
         btnToggle.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                // ничего, визуально тянем
-            }
-
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {}
             override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                arrowHint.stopHint()
                 userIsTracking = true
+                hideArrowHint()
             }
-
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
                 userIsTracking = false
                 val toStart = (btnToggle.progress >= 50)
                 if (toStart) {
-                    // Разрешения перед стартом
                     if (Build.VERSION.SDK_INT >= 33) {
                         val notifGranted = ContextCompat.checkSelfPermission(
-                            this@MainActivity, android.Manifest.permission.POST_NOTIFICATIONS
+                            this@MainActivity, Manifest.permission.POST_NOTIFICATIONS
                         ) == PackageManager.PERMISSION_GRANTED
                         if (!notifGranted) {
-                            updateUiRunning(false) // откат
-                            requestPostNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            updateUiRunning(false)
+                            requestPostNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
                             return
                         }
                     }
                     val micGranted = ContextCompat.checkSelfPermission(
-                        this@MainActivity, android.Manifest.permission.RECORD_AUDIO
+                        this@MainActivity, Manifest.permission.RECORD_AUDIO
                     ) == PackageManager.PERMISSION_GRANTED
                     if (!micGranted) {
                         updateUiRunning(false)
-                        requestRecordAudio.launch(android.Manifest.permission.RECORD_AUDIO)
+                        requestRecordAudio.launch(Manifest.permission.RECORD_AUDIO)
                         return
                     }
                     startCastService()
                 } else {
                     stopCastService()
                 }
+            }
+        })
+
+        // После измерения контейнера — синхронизируем состояние и покажем подсказку
+        sliderContainer.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                sliderContainer.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                updateUiRunning(CastService.isRunning)
             }
         })
 
@@ -176,12 +187,8 @@ class MainActivity : AppCompatActivity() {
             ivQr.setImageBitmap(null)
         }
 
-        SignalLevel.live.observe(this) { level ->
-            levelBar.progress = if (isRunning.get()) level.coerceIn(0, 100) else 0
-        }
-        ClientCount.live.observe(this) { count ->
-            updateClientsCount(count)
-        }
+        SignalLevel.live.observe(this) { level -> levelBar.progress = if (isRunning.get()) level.coerceIn(0, 100) else 0 }
+        ClientCount.live.observe(this) { count -> updateClientsCount(count) }
 
         updateUiRunning(false)
         updateClientsCount(0)
@@ -189,16 +196,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        audioManager.registerAudioDeviceCallback(
-            audioDeviceCallback,
-            Handler(Looper.getMainLooper())
-        )
-        updateUiRunning(CastService.isRunning) // синхронизация состояния
+        audioManager.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
+        updateUiRunning(CastService.isRunning)
     }
 
     override fun onStop() {
         super.onStop()
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
+        arrowHint.stopHint()
+        hideArrowHint()
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -209,15 +215,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
-            R.id.menu_settings -> {
-                startActivity(Intent(this, SettingsActivity::class.java)); true
-            }
-            R.id.action_language -> {
-                showLanguagePicker(); true
-            }
-            R.id.action_about -> {
-                startActivity(Intent(this, AboutActivity::class.java)); true
-            }
+            R.id.menu_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
+            R.id.action_language -> { showLanguagePicker(); true }
+            R.id.action_about -> { startActivity(Intent(this, AboutActivity::class.java)); true }
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -239,36 +239,38 @@ class MainActivity : AppCompatActivity() {
     private fun updateUiRunning(running: Boolean) {
         isRunning.set(running)
 
-        // Ставим ползунок в край
-        if (!userIsTracking) {
-            btnToggle.progress = if (running) 100 else 0
-        }
 
-        // Подписи/статус
+
+        if (!userIsTracking) btnToggle.progress = if (running) 100 else 0
+
         tvStatus.text = getString(if (running) R.string.status_running else R.string.status_stopped)
         if (!running) levelBar.progress = 0
 
-        // Фон «пилюли» (bg_status_pill) — синий/красный
         val colorBg = if (running) Color.parseColor("#DC2626") else Color.parseColor("#2563EB")
         ViewCompat.setBackgroundTintList(btnToggle, ColorStateList.valueOf(colorBg))
+        arrowHint.setDirectionLeft(running)
+        arrowHint.startHint()
 
         updateInputBadge()
     }
 
-    // ===== Клиенты =====
+    private fun hideArrowHint() {
+        fgAnim?.cancel()
+        fgAnim = null
+        fgArrow?.alpha = 0
+        sliderContainer.foreground = null
+        fgArrow = null
+    }
+    // -----------------------------------------------
+
     private fun updateClientsCount(count: Int) {
         val isRu = AppCompatDelegate.getApplicationLocales()
             ?.toLanguageTags()
             ?.lowercase(Locale.ROOT)
             ?.startsWith("ru") == true
-        tvClients.text = if (isRu) {
-            "Подключено клиентов: $count"
-        } else {
-            "Connected clients: $count"
-        }
+        tvClients.text = if (isRu) "Подключено клиентов: $count" else "Connected clients: $count"
     }
 
-    // ===== Язык приложения =====
     private fun showLanguagePicker() {
         val items = arrayOf(getString(R.string.lang_ru), getString(R.string.lang_en))
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -281,8 +283,7 @@ class MainActivity : AppCompatActivity() {
                 AppCompatDelegate.setApplicationLocales(
                     LocaleListCompat.forLanguageTags(if (chosen == "ru") "ru" else "en")
                 )
-                dialog.dismiss()
-                recreate()
+                dialog.dismiss(); recreate()
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -302,14 +303,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    // ===== Вспомогательные =====
-    private fun currentClientUrl(): String? {
-        return lastUrl ?: getLocalIpAddress()?.let { "http://$it:8080" }
-    }
-
-    private fun getLocalIpAddress(): String? {
-        return NetUtils.getLocalIpv4(this)
-    }
+    private fun getLocalIpAddress(): String? = NetUtils.getLocalIpv4(this)
 
     private fun generateQrAsync(text: String, onReady: (Bitmap) -> Unit) {
         thread {
@@ -320,10 +314,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 val bitMatrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, size, size, hints)
                 val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-                for (x in 0 until size) {
-                    for (y in 0 until size) {
-                        bmp.setPixel(x, y, if (bitMatrix[x, y]) Color.BLACK else Color.WHITE)
-                    }
+                for (x in 0 until size) for (y in 0 until size) {
+                    bmp.setPixel(x, y, if (bitMatrix[x, y]) Color.BLACK else Color.WHITE)
                 }
                 runOnUiThread { onReady(bmp) }
             } catch (_: Throwable) { }
@@ -332,14 +324,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun currentLangCode(): String {
         AppCompatDelegate.getApplicationLocales()?.toLanguageTags()?.let { tags ->
-            if (tags.isNotEmpty()) {
-                return if (tags.lowercase(Locale.ROOT).startsWith("ru")) "ru" else "en"
-            }
+            if (tags.isNotEmpty()) return if (tags.lowercase(Locale.ROOT).startsWith("ru")) "ru" else "en"
         }
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        prefs.getString(KEY_APP_LANG, null)?.let { saved ->
-            return if (saved == "ru") "ru" else "en"
-        }
+        prefs.getString(KEY_APP_LANG, null)?.let { saved -> return if (saved == "ru") "ru" else "en" }
         val sys = resources.configuration.locales[0]
         return if (sys != null && sys.language.lowercase(Locale.ROOT).startsWith("ru")) "ru" else "en"
     }

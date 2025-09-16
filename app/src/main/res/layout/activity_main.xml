@@ -10,7 +10,6 @@
         android:layout_height="wrap_content"
         android:padding="12dp">
 
-        <!-- Toolbar -->
         <androidx.appcompat.widget.Toolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
@@ -35,36 +34,50 @@
                 android:paddingStart="12dp" />
         </androidx.appcompat.widget.Toolbar>
 
-        <!-- БОЛЬШОЙ слайдер-кнопка Start/Stop (SeekBar) -->
-        <SeekBar
-            android:id="@+id/btnToggle"
+        <FrameLayout
+            android:id="@+id/sliderContainer"
             android:layout_width="match_parent"
             android:layout_height="64dp"
             android:layout_marginTop="12dp"
             android:layout_marginBottom="8dp"
+            android:clipChildren="false"
+            android:clipToPadding="false">
 
-            android:background="@drawable/bg_status_pill"
-            android:progressDrawable="@drawable/slider_progress"
-            android:thumb="@drawable/slider_thumb"
+            <SeekBar
+                android:id="@+id/btnToggle"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_status_pill"
+                android:progressDrawable="@drawable/slider_progress"
+                android:thumb="@drawable/slider_thumb"
+                android:max="100"
+                android:progress="0"
+                android:paddingLeft="0dp"
+                android:paddingRight="0dp"
+                android:thumbOffset="0dp" />
 
-            android:max="100"
-            android:progress="0"
-            android:paddingLeft="0dp"
-            android:paddingRight="0dp"
-            android:thumbOffset="0dp" />
+            <com.buligin.vishnucast.HintArrowView
+                android:id="@+id/arrowHint"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone"
+                android:clickable="false"
+                android:focusable="false" />
+        </FrameLayout>
 
-        <!-- Индикатор уровня -->
+
+
+
         <ProgressBar
             android:id="@+id/signalLevelBar"
             style="?android:attr/progressBarStyleHorizontal"
             android:layout_width="match_parent"
             android:layout_height="8dp"
             android:layout_marginTop="10dp"
-            android:progress="0"
             android:max="100"
+            android:progress="0"
             android:progressDrawable="@drawable/signal_level_bar" />
 
-        <!-- Пилюля статуса -->
         <TextView
             android:id="@+id/tvStatus"
             android:layout_width="match_parent"
@@ -80,7 +93,6 @@
             android:textColor="#111827"
             android:textSize="14sp" />
 
-        <!-- Карточка с IP и подсказкой URL -->
         <LinearLayout
             android:orientation="vertical"
             android:layout_width="match_parent"
@@ -107,7 +119,6 @@
                 android:text="@string/hint_open_url" />
         </LinearLayout>
 
-        <!-- Клиенты -->
         <TextView
             android:id="@+id/tvClients"
             android:layout_width="match_parent"
@@ -123,7 +134,6 @@
             android:textColor="#6B7280"
             android:textSize="14sp" />
 
-        <!-- QR-код -->
         <ImageView
             android:id="@+id/ivQr"
             android:layout_width="220dp"

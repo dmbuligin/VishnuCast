@@ -61,6 +61,13 @@ android {
         buildConfigField("String", "BUILD_SHA", "\"$gitSha\"")
         buildConfigField("String", "BUILD_TIME", "\"$buildTimeUtc\"")
         buildConfigField("String", "APP_VERSION", "\"$verName\"")
+
+        defaultConfig {
+            vectorDrawables { useSupportLibrary = true }
+        }
+
+
+
     }
 
     buildFeatures {
