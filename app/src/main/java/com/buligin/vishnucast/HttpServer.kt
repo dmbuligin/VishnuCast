@@ -28,6 +28,9 @@ class VishnuServer(
         return when (session.uri) {
             "/", "/index.html" -> asset("index.html", "text/html; charset=utf-8")
             "/client.js"       -> asset("client.js", "application/javascript; charset=utf-8")
+            "/apple-touch-icon.png" -> asset("apple-touch-icon.png", "image/png")
+            "/favicon.png" -> asset("favicon.png", "image/png")
+
             else               -> newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Not found")
         }
     }
