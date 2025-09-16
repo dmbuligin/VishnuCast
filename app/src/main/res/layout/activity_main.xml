@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#F3F4F6">
@@ -36,17 +35,23 @@
                 android:paddingStart="12dp" />
         </androidx.appcompat.widget.Toolbar>
 
-        <!-- Слайдер Старт/Стоп на месте прежней кнопки -->
-        <com.google.android.material.switchmaterial.SwitchMaterial
+        <!-- БОЛЬШОЙ слайдер-кнопка Start/Stop (SeekBar) -->
+        <SeekBar
             android:id="@+id/btnToggle"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="64dp"
             android:layout_marginTop="12dp"
-            android:checked="false"
-            android:gravity="center_vertical"
-            android:textOn="@string/btn_stop"
-            android:textOff="@string/btn_start"
-            android:showText="true" />
+            android:layout_marginBottom="8dp"
+
+            android:background="@drawable/bg_status_pill"
+            android:progressDrawable="@drawable/slider_progress"
+            android:thumb="@drawable/slider_thumb"
+
+            android:max="100"
+            android:progress="0"
+            android:paddingLeft="0dp"
+            android:paddingRight="0dp"
+            android:thumbOffset="0dp" />
 
         <!-- Индикатор уровня -->
         <ProgressBar

@@ -29,10 +29,11 @@ import android.view.MenuInflater
 import android.view.MenuItem
 import android.widget.ImageView
 import android.widget.ProgressBar
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.view.ViewCompat
 import androidx.core.widget.TextViewCompat
-import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -49,12 +50,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvIp: TextView
     private lateinit var tvClients: TextView
     private lateinit var ivQr: ImageView
-    private lateinit var btnToggle: SwitchMaterial
+    private lateinit var btnToggle: SeekBar
     private lateinit var levelBar: ProgressBar
 
     private val isRunning = AtomicBoolean(false)
     private var lastUrl: String? = null
-    private var suppressToggleEvents = false
+    private var userIsTracking = false
 
     // === ИКОНКА ИСТОЧНИКА (USB/встроенный) ===
     private lateinit var audioManager: AudioManager
@@ -91,13 +92,18 @@ class MainActivity : AppCompatActivity() {
                     getString(R.string.permission_denied),
                     Toast.LENGTH_SHORT
                 ).show()
+                // Откатить ползунок
+                updateUiRunning(false)
             }
         }
 
-    // POST_NOTIFICATIONS (Android 13+, API 33): при выдаче — сразу стартуем сервис
+    // POST_NOTIFICATIONS (Android 13+, API 33)
     private val requestPostNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) startCastService() else showNotificationsDeniedDialog()
+            if (granted) startCastService() else {
+                showNotificationsDeniedDialog()
+                updateUiRunning(false)
+            }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -119,35 +125,45 @@ class MainActivity : AppCompatActivity() {
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         updateInputBadge()
 
-        // Слушатель переключения слайдера
-        btnToggle.setOnCheckedChangeListener { _, isChecked ->
-            if (suppressToggleEvents) return@setOnCheckedChangeListener
-            if (isChecked) {
-                // Android 13+: уведомления
-                if (Build.VERSION.SDK_INT >= 33) {
-                    val notifGranted = ContextCompat.checkSelfPermission(
-                        this, Manifest.permission.POST_NOTIFICATIONS
-                    ) == PackageManager.PERMISSION_GRANTED
-                    if (!notifGranted) {
-                        updateUiRunning(false)
-                        requestPostNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        return@setOnCheckedChangeListener
-                    }
-                }
-                // RECORD_AUDIO
-                val micGranted = ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.RECORD_AUDIO
-                ) == PackageManager.PERMISSION_GRANTED
-                if (!micGranted) {
-                    updateUiRunning(false)
-                    requestRecordAudio.launch(Manifest.permission.RECORD_AUDIO)
-                    return@setOnCheckedChangeListener
-                }
-                startCastService()
-            } else {
-                stopCastService()
+        // Логика "свайп — старт/стоп"
+        btnToggle.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                // ничего, визуально тянем
             }
-        }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                userIsTracking = true
+            }
+
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                userIsTracking = false
+                val toStart = (btnToggle.progress >= 50)
+                if (toStart) {
+                    // Разрешения перед стартом
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        val notifGranted = ContextCompat.checkSelfPermission(
+                            this@MainActivity, android.Manifest.permission.POST_NOTIFICATIONS
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (!notifGranted) {
+                            updateUiRunning(false) // откат
+                            requestPostNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                            return
+                        }
+                    }
+                    val micGranted = ContextCompat.checkSelfPermission(
+                        this@MainActivity, android.Manifest.permission.RECORD_AUDIO
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (!micGranted) {
+                        updateUiRunning(false)
+                        requestRecordAudio.launch(android.Manifest.permission.RECORD_AUDIO)
+                        return
+                    }
+                    startCastService()
+                } else {
+                    stopCastService()
+                }
+            }
+        })
 
         val ip = getLocalIpAddress()
         val url = if (ip != null) "http://$ip:8080" else getString(R.string.placeholder_url)
@@ -177,8 +193,7 @@ class MainActivity : AppCompatActivity() {
             audioDeviceCallback,
             Handler(Looper.getMainLooper())
         )
-        // Синхронизация UI с реальным состоянием сервиса
-        updateUiRunning(CastService.isRunning)
+        updateUiRunning(CastService.isRunning) // синхронизация состояния
     }
 
     override fun onStop() {
@@ -223,16 +238,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateUiRunning(running: Boolean) {
         isRunning.set(running)
-        // Не триггерим слушатель при программной установке переключателя
-        suppressToggleEvents = true
-        btnToggle.isChecked = running
-        suppressToggleEvents = false
 
+        // Ставим ползунок в край
+        if (!userIsTracking) {
+            btnToggle.progress = if (running) 100 else 0
+        }
+
+        // Подписи/статус
         tvStatus.text = getString(if (running) R.string.status_running else R.string.status_stopped)
         if (!running) levelBar.progress = 0
+
+        // Фон «пилюли» (bg_status_pill) — синий/красный
+        val colorBg = if (running) Color.parseColor("#DC2626") else Color.parseColor("#2563EB")
+        ViewCompat.setBackgroundTintList(btnToggle, ColorStateList.valueOf(colorBg))
+
         updateInputBadge()
     }
 
+    // ===== Клиенты =====
     private fun updateClientsCount(count: Int) {
         val isRu = AppCompatDelegate.getApplicationLocales()
             ?.toLanguageTags()
@@ -245,6 +268,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ===== Язык приложения =====
     private fun showLanguagePicker() {
         val items = arrayOf(getString(R.string.lang_ru), getString(R.string.lang_en))
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -278,6 +302,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    // ===== Вспомогательные =====
     private fun currentClientUrl(): String? {
         return lastUrl ?: getLocalIpAddress()?.let { "http://$it:8080" }
     }
