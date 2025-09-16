@@ -27,13 +27,12 @@ import android.provider.Settings
 import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
-import android.widget.Button
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
-import androidx.core.view.ViewCompat
 import androidx.core.widget.TextViewCompat
+import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -50,11 +49,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvIp: TextView
     private lateinit var tvClients: TextView
     private lateinit var ivQr: ImageView
-    private lateinit var btnToggle: Button
+    private lateinit var btnToggle: SwitchMaterial
     private lateinit var levelBar: ProgressBar
 
     private val isRunning = AtomicBoolean(false)
     private var lastUrl: String? = null
+    private var suppressToggleEvents = false
 
     // === ИКОНКА ИСТОЧНИКА (USB/встроенный) ===
     private lateinit var audioManager: AudioManager
@@ -119,27 +119,33 @@ class MainActivity : AppCompatActivity() {
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         updateInputBadge()
 
-        btnToggle.setOnClickListener {
-            if (isRunning.get()) {
-                stopCastService()
-            } else {
+        // Слушатель переключения слайдера
+        btnToggle.setOnCheckedChangeListener { _, isChecked ->
+            if (suppressToggleEvents) return@setOnCheckedChangeListener
+            if (isChecked) {
+                // Android 13+: уведомления
                 if (Build.VERSION.SDK_INT >= 33) {
                     val notifGranted = ContextCompat.checkSelfPermission(
                         this, Manifest.permission.POST_NOTIFICATIONS
                     ) == PackageManager.PERMISSION_GRANTED
                     if (!notifGranted) {
+                        updateUiRunning(false)
                         requestPostNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        return@setOnClickListener
+                        return@setOnCheckedChangeListener
                     }
                 }
+                // RECORD_AUDIO
                 val micGranted = ContextCompat.checkSelfPermission(
                     this, Manifest.permission.RECORD_AUDIO
                 ) == PackageManager.PERMISSION_GRANTED
                 if (!micGranted) {
+                    updateUiRunning(false)
                     requestRecordAudio.launch(Manifest.permission.RECORD_AUDIO)
-                    return@setOnClickListener
+                    return@setOnCheckedChangeListener
                 }
                 startCastService()
+            } else {
+                stopCastService()
             }
         }
 
@@ -155,11 +161,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         SignalLevel.live.observe(this) { level ->
-            if (isRunning.get()) {
-                levelBar.progress = level.coerceIn(0, 100)
-            } else {
-                levelBar.progress = 0
-            }
+            levelBar.progress = if (isRunning.get()) level.coerceIn(0, 100) else 0
         }
         ClientCount.live.observe(this) { count ->
             updateClientsCount(count)
@@ -175,7 +177,7 @@ class MainActivity : AppCompatActivity() {
             audioDeviceCallback,
             Handler(Looper.getMainLooper())
         )
-        // 🔑 Синхронизация UI с реальным состоянием сервиса
+        // Синхронизация UI с реальным состоянием сервиса
         updateUiRunning(CastService.isRunning)
     }
 
@@ -221,26 +223,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateUiRunning(running: Boolean) {
         isRunning.set(running)
-        btnToggle.isSelected = running
-        btnToggle.text = getString(if (running) R.string.btn_stop else R.string.btn_start)
-        tvStatus.text = getString(if (running) R.string.status_running else R.string.status_stopped)
-        if (!running) {
-            levelBar.progress = 0
-        }
-        applyButtonColors(running)
-        updateInputBadge()
-    }
+        // Не триггерим слушатель при программной установке переключателя
+        suppressToggleEvents = true
+        btnToggle.isChecked = running
+        suppressToggleEvents = false
 
-    private fun applyButtonColors(running: Boolean) {
-        val bgColor = if (running) Color.parseColor("#DC2626") else Color.parseColor("#2563EB")
-        val pressedColor = if (running) Color.parseColor("#B91C1C") else Color.parseColor("#1E40AF")
-        val states = arrayOf(
-            intArrayOf(android.R.attr.state_pressed),
-            intArrayOf()
-        )
-        val colors = intArrayOf(pressedColor, bgColor)
-        ViewCompat.setBackgroundTintList(btnToggle, ColorStateList(states, colors))
-        btnToggle.setTextColor(Color.WHITE)
+        tvStatus.text = getString(if (running) R.string.status_running else R.string.status_stopped)
+        if (!running) levelBar.progress = 0
+        updateInputBadge()
     }
 
     private fun updateClientsCount(count: Int) {
@@ -311,8 +301,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 runOnUiThread { onReady(bmp) }
-            } catch (_: Throwable) {
-            }
+            } catch (_: Throwable) { }
         }
     }
 

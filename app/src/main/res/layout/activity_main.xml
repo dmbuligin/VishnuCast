@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#F3F4F6">
@@ -35,15 +36,17 @@
                 android:paddingStart="12dp" />
         </androidx.appcompat.widget.Toolbar>
 
-        <!-- Кнопка Старт/Стоп -->
-        <Button
+        <!-- Слайдер Старт/Стоп на месте прежней кнопки -->
+        <com.google.android.material.switchmaterial.SwitchMaterial
             android:id="@+id/btnToggle"
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:layout_marginTop="12dp"
-            android:text="@string/btn_start"
-            android:textAllCaps="false"
-            android:textSize="16sp" />
+            android:checked="false"
+            android:gravity="center_vertical"
+            android:textOn="@string/btn_stop"
+            android:textOff="@string/btn_start"
+            android:showText="true" />
 
         <!-- Индикатор уровня -->
         <ProgressBar
@@ -56,7 +59,7 @@
             android:max="100"
             android:progressDrawable="@drawable/signal_level_bar" />
 
-        <!-- Пилюля статуса: на всю ширину, текст по центру -->
+        <!-- Пилюля статуса -->
         <TextView
             android:id="@+id/tvStatus"
             android:layout_width="match_parent"
@@ -81,7 +84,6 @@
             android:background="@drawable/bg_info_card"
             android:padding="10dp">
 
-            <!-- Порядок: сначала IP, потом подсказка URL -->
             <TextView
                 android:id="@+id/tvIp"
                 android:layout_width="match_parent"
@@ -100,7 +102,7 @@
                 android:text="@string/hint_open_url" />
         </LinearLayout>
 
-        <!-- Отдельная пилюля для tvClients -->
+        <!-- Клиенты -->
         <TextView
             android:id="@+id/tvClients"
             android:layout_width="match_parent"
