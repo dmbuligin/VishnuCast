@@ -16,10 +16,7 @@ import android.os.IBinder
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 
-
-
 class CastService : Service() {
-
     private var server: VishnuServer? = null
 
     override fun onCreate() {
@@ -46,19 +43,24 @@ class CastService : Service() {
         MicLevelProbe.start(applicationContext)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Фикс состояния при пересоздании Activity (поворот экрана и т.п.)
+        isRunning = true
+        return START_STICKY
+    }
 
     override fun onDestroy() {
         try {
             MicLevelProbe.stop()
-        } catch (_: Throwable) {
-        }
+        } catch (_: Throwable) { }
 
         try {
             server?.shutdown()
             Logger.i("CastService", "VishnuServer stopped")
-        } catch (_: Throwable) {
-        }
+        } catch (_: Throwable) { }
+
+        // Сервис реально остановлен — сбрасываем флаг
+        isRunning = false
 
         if (Build.VERSION.SDK_INT >= 24) {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -126,7 +128,6 @@ class CastService : Service() {
             .build()
     }
 
-
     private fun buildErrorNotification(msg: String): Notification {
         val openIntent = Intent(this, MainActivity::class.java)
         val pi = PendingIntent.getActivity(
@@ -160,6 +161,8 @@ class CastService : Service() {
     }
 
     companion object {
+        @Volatile var isRunning: Boolean = false
+
         private const val CHANNEL_ID = "vishnucast_running"
         private const val NOTIF_ID = 1001
     }

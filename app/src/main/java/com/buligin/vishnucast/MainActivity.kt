@@ -72,16 +72,15 @@ class MainActivity : AppCompatActivity() {
         val usb = isUsbMicConnected()
         val iconRes = if (usb) R.drawable.ic_headset_mic_24 else R.drawable.ic_mic_24
         val icon = ContextCompat.getDrawable(this, iconRes)
-        val size = dp(32) // ← размер иконки в dp (можно 36/40 по вкусу)
+        val size = dp(32)
         icon?.setBounds(0, 0, size, size)
-        tvStatus.setCompoundDrawables(icon, null, null, null) // без Intrinsic, используем bounds
+        tvStatus.setCompoundDrawables(icon, null, null, null)
         tvStatus.compoundDrawablePadding = dp(8)
         TextViewCompat.setCompoundDrawableTintList(
             tvStatus,
             ColorStateList.valueOf(Color.parseColor("#6B7280"))
         )
     }
-
 
     // RECORD_AUDIO
     private val requestRecordAudio =
@@ -105,7 +104,6 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Toolbar с кастомным контентом, встроенный title отключён
         val toolbar: androidx.appcompat.widget.Toolbar = findViewById(R.id.toolbar)
         setSupportActionBar(toolbar)
         supportActionBar?.setDisplayShowTitleEnabled(false)
@@ -118,7 +116,6 @@ class MainActivity : AppCompatActivity() {
         btnToggle = findViewById(R.id.btnToggle)
         levelBar = findViewById(R.id.signalLevelBar)
 
-        // AudioManager для отслеживания USB-мика
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         updateInputBadge()
 
@@ -126,7 +123,6 @@ class MainActivity : AppCompatActivity() {
             if (isRunning.get()) {
                 stopCastService()
             } else {
-                // 1) Android 13+: запрос на уведомления
                 if (Build.VERSION.SDK_INT >= 33) {
                     val notifGranted = ContextCompat.checkSelfPermission(
                         this, Manifest.permission.POST_NOTIFICATIONS
@@ -136,7 +132,6 @@ class MainActivity : AppCompatActivity() {
                         return@setOnClickListener
                     }
                 }
-                // 2) RECORD_AUDIO
                 val micGranted = ContextCompat.checkSelfPermission(
                     this, Manifest.permission.RECORD_AUDIO
                 ) == PackageManager.PERMISSION_GRANTED
@@ -144,12 +139,10 @@ class MainActivity : AppCompatActivity() {
                     requestRecordAudio.launch(Manifest.permission.RECORD_AUDIO)
                     return@setOnClickListener
                 }
-                // 3) Стартуем
                 startCastService()
             }
         }
 
-        // Подсказка URL и IP
         val ip = getLocalIpAddress()
         val url = if (ip != null) "http://$ip:8080" else getString(R.string.placeholder_url)
         lastUrl = if (ip != null) url else null
@@ -161,7 +154,6 @@ class MainActivity : AppCompatActivity() {
             ivQr.setImageBitmap(null)
         }
 
-        // Подписки на LiveData — индикатор и счётчик клиентов
         SignalLevel.live.observe(this) { level ->
             if (isRunning.get()) {
                 levelBar.progress = level.coerceIn(0, 100)
@@ -173,18 +165,18 @@ class MainActivity : AppCompatActivity() {
             updateClientsCount(count)
         }
 
-        // Стартовое состояние UI
         updateUiRunning(false)
         updateClientsCount(0)
     }
 
-    // Регистрируем/снимаем callback отслеживания устройств
     override fun onStart() {
         super.onStart()
         audioManager.registerAudioDeviceCallback(
             audioDeviceCallback,
             Handler(Looper.getMainLooper())
         )
+        // 🔑 Синхронизация UI с реальным состоянием сервиса
+        updateUiRunning(CastService.isRunning)
     }
 
     override fun onStop() {
@@ -192,7 +184,6 @@ class MainActivity : AppCompatActivity() {
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
     }
 
-    // ====== Меню ======
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         val inflater: MenuInflater = menuInflater
         inflater.inflate(R.menu.main_menu, menu)
@@ -214,7 +205,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ====== Запуск/останов сервиса ======
     private fun startCastService() {
         if (Build.VERSION.SDK_INT >= 26) {
             ContextCompat.startForegroundService(this, Intent(this, CastService::class.java))
@@ -235,15 +225,13 @@ class MainActivity : AppCompatActivity() {
         btnToggle.text = getString(if (running) R.string.btn_stop else R.string.btn_start)
         tvStatus.text = getString(if (running) R.string.status_running else R.string.status_stopped)
         if (!running) {
-            levelBar.progress = 0 // принудительный сброс индикатора
+            levelBar.progress = 0
         }
         applyButtonColors(running)
-        updateInputBadge() // обновим бейдж на случай смены источника
+        updateInputBadge()
     }
 
     private fun applyButtonColors(running: Boolean) {
-        // Idle: blue #2563EB / pressed #1E40AF
-        // Running: red #DC2626 / pressed #B91C1C
         val bgColor = if (running) Color.parseColor("#DC2626") else Color.parseColor("#2563EB")
         val pressedColor = if (running) Color.parseColor("#B91C1C") else Color.parseColor("#1E40AF")
         val states = arrayOf(
@@ -255,7 +243,6 @@ class MainActivity : AppCompatActivity() {
         btnToggle.setTextColor(Color.WHITE)
     }
 
-    // ===== Клиенты =====
     private fun updateClientsCount(count: Int) {
         val isRu = AppCompatDelegate.getApplicationLocales()
             ?.toLanguageTags()
@@ -268,13 +255,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ===== Язык приложения =====
     private fun showLanguagePicker() {
         val items = arrayOf(getString(R.string.lang_ru), getString(R.string.lang_en))
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-
         val checkedIndex = if (currentLangCode() == "ru") 0 else 1
-
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.lang_title))
             .setSingleChoiceItems(items, checkedIndex) { dialog, which ->
@@ -290,7 +274,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    // ===== Диалог при отказе в уведомлениях =====
     private fun showNotificationsDeniedDialog() {
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.app_name))
@@ -305,7 +288,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    // ===== Вспомогательные =====
     private fun currentClientUrl(): String? {
         return lastUrl ?: getLocalIpAddress()?.let { "http://$it:8080" }
     }
@@ -330,29 +312,23 @@ class MainActivity : AppCompatActivity() {
                 }
                 runOnUiThread { onReady(bmp) }
             } catch (_: Throwable) {
-                // ignore
             }
         }
     }
 
     private fun currentLangCode(): String {
-        // 1) Пробуем AppCompatDelegate locales
         AppCompatDelegate.getApplicationLocales()?.toLanguageTags()?.let { tags ->
             if (tags.isNotEmpty()) {
                 return if (tags.lowercase(Locale.ROOT).startsWith("ru")) "ru" else "en"
             }
         }
-        // 2) Пробуем prefs (если уже сохраняли)
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         prefs.getString(KEY_APP_LANG, null)?.let { saved ->
             return if (saved == "ru") "ru" else "en"
         }
-        // 3) Системная локаль по умолчанию
         val sys = resources.configuration.locales[0]
         return if (sys != null && sys.language.lowercase(Locale.ROOT).startsWith("ru")) "ru" else "en"
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-
-
 }
