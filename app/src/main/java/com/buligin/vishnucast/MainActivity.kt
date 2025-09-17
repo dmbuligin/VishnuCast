@@ -11,7 +11,6 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import android.Manifest
-//import android.animation.ValueAnimator
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
@@ -27,15 +26,12 @@ import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
 import android.view.ViewTreeObserver
-//import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-//import androidx.appcompat.content.res.AppCompatResources
-//import androidx.core.graphics.drawable.DrawableCompat
 import androidx.core.view.ViewCompat
 import androidx.core.widget.TextViewCompat
 import android.media.AudioDeviceCallback
@@ -44,6 +40,12 @@ import android.media.AudioManager
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.content.Context
+import android.view.View
+
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -52,6 +54,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_APP_LANG = "app_lang" // "ru" | "en"
     }
 
+    private lateinit var tvNetBadge: TextView
     private var netMon: NetworkMonitor? = null
     private lateinit var arrowHint: HintArrowView
     private lateinit var tvStatus: TextView
@@ -113,6 +116,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        tvNetBadge = findViewById(R.id.tvNetBadge)
 
         val toolbar: androidx.appcompat.widget.Toolbar = findViewById(R.id.toolbar)
         setSupportActionBar(toolbar)
@@ -346,9 +350,21 @@ class MainActivity : AppCompatActivity() {
     private fun applyIpToUi(ip: String?) {
         val url = if (ip != null) "http://$ip:8080" else getString(R.string.placeholder_url)
         lastUrl = if (ip != null) url else null
+
         tvHint.text = getString(R.string.hint_open_url, url)
         tvIp.text = getString(R.string.ip_fmt, ip ?: getString(R.string.ip_unknown))
 
+        // Бейдж сети
+        val kind = detectNetKind(ip)
+        tvNetBadge.text = when (kind) {
+            NetKind.AP   -> getString(R.string.badge_ap)
+            NetKind.WIFI -> getString(R.string.badge_wifi)
+            NetKind.ETH  -> getString(R.string.badge_eth)
+            NetKind.OTHER -> getString(R.string.badge_other)
+        }
+        tvNetBadge.visibility = if (ip != null) View.VISIBLE else View.GONE
+
+        // QR
         if (ip != null) {
             generateQrAsync(url) { bmp -> ivQr.setImageBitmap(bmp) }
         } else {
@@ -356,6 +372,55 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+
+    private enum class NetKind { AP, WIFI, ETH, OTHER }
+
+    private fun detectNetKind(ip: String?): NetKind {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val active = cm.activeNetwork
+        val caps = cm.getNetworkCapabilities(active)
+
+        // 1) Сначала по транспорту активной сети
+        if (caps != null) {
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return NetKind.ETH
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))     return NetKind.WIFI
+        }
+
+        // 2) Fallback: ищем интерфейс, которому принадлежит наш локальный IP,
+        //    и определяем по имени (ap*, wlan*, eth*)
+        if (ip != null) {
+            try {
+                val target = java.net.InetAddress.getByName(ip)
+                val ifs = java.net.NetworkInterface.getNetworkInterfaces()
+                while (ifs.hasMoreElements()) {
+                    val ni = ifs.nextElement()
+                    val addrs = ni.inetAddresses
+                    while (addrs.hasMoreElements()) {
+                        val a = addrs.nextElement()
+                        if (a.hostAddress == target.hostAddress) {
+                            val n = ni.name.lowercase()
+                            return when {
+                                n.startsWith("ap")   -> NetKind.AP
+                                n.startsWith("eth")  -> NetKind.ETH
+                                n.startsWith("wlan") -> NetKind.WIFI
+                                else -> NetKind.OTHER
+                            }
+                        }
+                    }
+                }
+            } catch (_: Throwable) { /* no-op */ }
+        }
+
+        // 3) Доп. эвристика: нет активной сети, но IP частный → вероятнее всего hotspot (AP)
+        if (ip != null && isPrivateIpv4(ip) && active == null) return NetKind.AP
+
+        return NetKind.OTHER
+    }
+
+    private fun isPrivateIpv4(ip: String): Boolean =
+        ip.startsWith("10.") ||
+            ip.startsWith("192.168.") ||
+            (ip.startsWith("172.") && ip.substringAfter("172.").substringBefore(".").toIntOrNull() in 16..31)
 
 
 }

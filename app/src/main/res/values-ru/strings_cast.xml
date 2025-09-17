@@ -67,5 +67,11 @@
         <item>BUILTIN</item>
     </string-array>
 
+    <!-- NetMon -->
+    <string name="badge_ap">AP</string>
+    <string name="badge_wifi">Wi-Fi</string>
+    <string name="badge_eth">ETH</string>
+    <string name="badge_other">СЕТЬ</string>
+
 
 </resources>
