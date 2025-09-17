@@ -44,6 +44,8 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.content.Context
 import android.view.View
+import android.net.wifi.WifiManager
+
 
 
 
@@ -380,14 +382,13 @@ class MainActivity : AppCompatActivity() {
         val active = cm.activeNetwork
         val caps = cm.getNetworkCapabilities(active)
 
-        // 1) Сначала по транспорту активной сети
+        // 1) По активной сети (если есть)
         if (caps != null) {
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return NetKind.ETH
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))     return NetKind.WIFI
         }
 
-        // 2) Fallback: ищем интерфейс, которому принадлежит наш локальный IP,
-        //    и определяем по имени (ap*, wlan*, eth*)
+        // 2) Fallback: ищем интерфейс, которому принадлежит наш IP, и решаем по имени + состоянию Wi-Fi
         if (ip != null) {
             try {
                 val target = java.net.InetAddress.getByName(ip)
@@ -399,23 +400,27 @@ class MainActivity : AppCompatActivity() {
                         val a = addrs.nextElement()
                         if (a.hostAddress == target.hostAddress) {
                             val n = ni.name.lowercase()
-                            return when {
-                                n.startsWith("ap")   -> NetKind.AP
-                                n.startsWith("eth")  -> NetKind.ETH
-                                n.startsWith("wlan") -> NetKind.WIFI
-                                else -> NetKind.OTHER
+                            // Если интерфейс ap* — это явно хотспот
+                            if (n.startsWith("ap")) return NetKind.AP
+                            // Если интерфейс wlan*, но Wi-Fi (STA) выключен — значит Soft AP
+                            if (n.startsWith("wlan")) {
+                                val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                                return if (!wm.isWifiEnabled) NetKind.AP else NetKind.WIFI
                             }
+                            if (n.startsWith("eth")) return NetKind.ETH
+                            return NetKind.OTHER
                         }
                     }
                 }
             } catch (_: Throwable) { /* no-op */ }
         }
 
-        // 3) Доп. эвристика: нет активной сети, но IP частный → вероятнее всего hotspot (AP)
+        // 3) Нет активной сети, но локальный приватный IP — вероятнее всего локальный хотспот
         if (ip != null && isPrivateIpv4(ip) && active == null) return NetKind.AP
 
         return NetKind.OTHER
     }
+
 
     private fun isPrivateIpv4(ip: String): Boolean =
         ip.startsWith("10.") ||
