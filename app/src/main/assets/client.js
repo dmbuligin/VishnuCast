@@ -1,8 +1,8 @@
-/* VishnuCast client — recv-only audio; single click handler; UI styles injected; no meter; RU/EN i18n */
+/* VishnuCast client — robust signaling (flat/nested), recv-only audio, RU/EN, single-button UI */
 (function () {
   'use strict';
 
-  // ---------- Inject minimal UI CSS (hover/active/focus, spinner, connected color) ----------
+  // ---------- Inject minimal UI CSS ----------
   (function injectStyles(){
     var css = [
       ':root{--vc-btn:#2563eb;--vc-btn-hover:#1d4ed8;--vc-btn-on:#16a34a;--vc-fg:#fff}',
@@ -13,338 +13,432 @@
       '  transition:transform .12s ease,box-shadow .2s ease,background-color .2s ease,opacity .2s ease;',
       '  -webkit-tap-highlight-color: rgba(0,0,0,.06)}',
       '#btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 2px 0 rgba(0,0,0,.05),0 8px 16px rgba(37,99,235,.25)}',
-      '#btn:active:not(:disabled){transform:translateY(0);box-shadow:0 1px 0 rgba(0,0,0,.05),0 4px 10px rgba(37,99,235,.25)}',
-      '#btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(37,99,235,.35),0 6px 12px rgba(37,99,235,.25)}',
-      '#btn:disabled{opacity:.6;cursor:not-allowed}',
-      /* visual states via data-state */
-      '#btn[data-state="connected"]{background:var(--vc-btn-on);box-shadow:0 1px 0 rgba(0,0,0,.05),0 6px 12px rgba(22,163,74,.25)}',
-      '#btn[data-state="connecting"]{background:var(--vc-btn-hover);position:relative}',
-      '#btn[data-state="connecting"]::after{content:"";display:inline-block;width:14px;height:14px;margin-left:8px;',
-      '  border:2px solid rgba(255,255,255,.6);border-top-color:#fff;border-radius:50%;animation:vc-spin .9s linear infinite}',
+      '#btn:active:not(:disabled){transform:translateY(0)}',
+      '#btn:disabled{opacity:.5;cursor:not-allowed}',
+      '#btn .spin{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.5);',
+      '  border-top-color:#fff;animation:vc-spin .9s linear infinite}',
       '@keyframes vc-spin{to{transform:rotate(360deg)}}',
-      '@media (prefers-reduced-motion:reduce){#btn{transition:none}#btn[data-state="connecting"]::after{animation:none}}'
-    ].join('');
-    var s = document.createElement('style');
-    s.type = 'text/css'; s.appendChild(document.createTextNode(css));
-    document.head ? document.head.appendChild(s) : document.documentElement.appendChild(s);
+      '#status.connected{color:#059669}',
+    ].join('\n');
+    var st = document.createElement('style');
+    st.type = 'text/css';
+    st.appendChild(document.createTextNode(css));
+    document.head.appendChild(st);
   })();
 
-  // ---------- DOM ----------
-  function $(sel) { return document.querySelector(sel); }
-  var btn = $('#btn');
-  var statusEl = $('#status');
-  var audioEl = $('#audio');
-  var langRuBtn = $('#lang-ru');
-  var langEnBtn = $('#lang-en');
-
-  if (!btn) {
-    btn = document.createElement('button');
-    btn.id = 'btn';
-    btn.textContent = 'Подключить';
-    document.body.insertBefore(btn, document.body.firstChild);
-  }
-  if (!statusEl) {
-    statusEl = document.createElement('p');
-    statusEl.id = 'status';
-    statusEl.className = 'status-text';
-    statusEl.textContent = 'Статус: не подключено';
-    btn.parentNode ? btn.parentNode.insertBefore(statusEl, btn.nextSibling) : document.body.appendChild(statusEl);
-  }
-  if (!audioEl) {
-    audioEl = document.createElement('audio');
-    audioEl.id = 'audio';
-    document.body.appendChild(audioEl);
-  }
-  audioEl.setAttribute('autoplay', '');
-  audioEl.setAttribute('playsinline', '');
-  audioEl.style.display = 'none';
-
   // ---------- i18n ----------
-  var LS_KEY = 'vishnucast.lang';
-  var TEXTS = {
-    ru: {
-      btn_connect: 'Подключить звук',
-      btn_disconnect: 'Отключить',
-      connecting: 'Подключение…',
-      connected: 'Подключено',
-      disconnected: 'Отключено',
-      ws_closed: 'Сигналинг закрыт',
-      err: 'Ошибка',
-      status_prefix: 'Статус: '
-    },
-    en: {
-      btn_connect: 'Connect audio',
-      btn_disconnect: 'Disconnect',
-      connecting: 'Connecting…',
-      connected: 'Connected',
-      disconnected: 'Disconnected',
-      ws_closed: 'Signaling closed',
-      err: 'Error',
-      status_prefix: 'Status: '
+  var texts = (function(){
+    var isRu = (navigator.language || '').toLowerCase().startsWith('ru');
+    var storeKey = 'vishnucast.lang';
+    var saved = (function(){ try { return localStorage.getItem(storeKey); } catch(_) { return null; }})();
+    var lang = saved || (isRu ? 'ru' : 'en');
+
+    function setLang(l){
+      lang = (l === 'ru') ? 'ru' : 'en';
+      try { localStorage.setItem(storeKey, lang); } catch(_) {}
+      applyTexts();
     }
-  };
 
-  function detectInitialLang() {
-    try {
-      var saved = localStorage.getItem(LS_KEY);
-      if (saved === 'ru' || saved === 'en') return saved;
-    } catch(_) {}
-    var nav = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
-    return nav.indexOf('ru') === 0 ? 'ru' : 'en';
-  }
-
-  var currentLang = detectInitialLang();
-  var texts = TEXTS[currentLang];
-
-  function applyLangToUi() {
-    try {
-      // Кнопка
-      if (state === 'connected') btn.textContent = texts.btn_disconnect;
-      else if (state === 'connecting') btn.textContent = texts.connecting;
-      else btn.textContent = texts.btn_connect;
-
-      // Статус (оставляем только префикс; конкретное значение обновляется через setStatus)
-      if (statusEl && typeof statusEl.textContent === 'string') {
-        var suffix = statusEl.textContent.split(':').slice(1).join(':').trim();
-        if (!suffix) suffix = (state === 'connected' ? texts.connected :
-                               state === 'connecting' ? texts.connecting :
-                               texts.disconnected);
-        statusEl.textContent = texts.status_prefix + suffix;
+    var dict = {
+      en: {
+        connect: 'Connect',
+        connecting: 'Connecting…',
+        disconnect: 'Disconnect',
+        status_idle: 'Idle. Press Connect to start.',
+        status_connecting: 'Connecting…',
+        status_connected: 'Connected',
+        status_error: 'Error',
+        hint_open: 'Open in your browser: ',
+        ws_closed: 'Connection closed.',
+        ws_error: 'WebSocket error',
+        pc_failed: 'PeerConnection failed',
+        track_ended: 'Audio track ended',
+        no_audio: 'No audio track received',
+        lang_label: 'Language',
+        lang_ru: 'Рус',
+        lang_en: 'EN',
+      },
+      ru: {
+        connect: 'Подключиться',
+        connecting: 'Подключение…',
+        disconnect: 'Отключиться',
+        status_idle: 'Ожидание. Нажмите «Подключиться».',
+        status_connecting: 'Подключение…',
+        status_connected: 'Подключено',
+        status_error: 'Ошибка',
+        hint_open: 'Откройте в браузере: ',
+        ws_closed: 'Соединение закрыто.',
+        ws_error: 'Ошибка WebSocket',
+        pc_failed: 'Ошибка PeerConnection',
+        track_ended: 'Аудио-трек завершён',
+        no_audio: 'Аудио-трек не получен',
+        lang_label: 'Язык',
+        lang_ru: 'Рус',
+        lang_en: 'EN',
       }
+    };
 
-      // Подсветка активной кнопки языка
-      if (langRuBtn) langRuBtn.setAttribute('aria-current', String(currentLang === 'ru'));
-      if (langEnBtn) langEnBtn.setAttribute('aria-current', String(currentLang === 'en'));
-      // <html lang=...> (необязательно)
-      try { document.documentElement.lang = currentLang; } catch(_) {}
-    } catch(_) {}
-  }
+    function t(key){ return (dict[lang] && dict[lang][key]) || key; }
 
-  function setLang(lang) {
-    currentLang = (lang === 'ru') ? 'ru' : 'en';
-    texts = TEXTS[currentLang];
-    try { localStorage.setItem(LS_KEY, currentLang); } catch(_) {}
-    applyLangToUi();
-  }
+    function applyTexts(){
+      var btn = document.getElementById('btn');
+      var status = document.getElementById('status');
+      var hint = document.getElementById('hint');
+      var langLabel = document.getElementById('langLabel');
+      var langRu = document.getElementById('langRu');
+      var langEn = document.getElementById('langEn');
 
-  if (langRuBtn) langRuBtn.addEventListener('click', function(){ setLang('ru'); });
-  if (langEnBtn) langEnBtn.addEventListener('click', function(){ setLang('en'); });
+      if (btn) btn.textContent = (state === 'connected') ? t('disconnect') : (state === 'connecting' ? t('connecting') : t('connect'));
+      if (status) {
+        status.textContent = (state === 'connected') ? t('status_connected')
+          : (state === 'connecting' ? t('status_connecting') : t('status_idle'));
+        status.classList.toggle('connected', state === 'connected');
+      }
+      if (hint) {
+        try {
+          var origin = location.protocol + '//' + location.host;
+          hint.innerHTML = '<span>' + t('hint_open') + '</span><a href="' + origin + '">' + origin + '</a>';
+        } catch (_) {
+          hint.textContent = t('hint_open');
+        }
+      }
+      if (langLabel) langLabel.textContent = t('lang_label') + ':';
+      if (langRu) langRu.textContent = t('lang_ru');
+      if (langEn) langEn.textContent = t('lang_en');
+    }
 
-  // ---------- Status / Button helpers ----------
-  function setStatusTextCore(s) {
-    statusEl.textContent = texts.status_prefix + s;
-  }
-  function setStatus(s) { setStatusTextCore(s); }
-  function enableBtn()  { btn.disabled = false; btn.style.pointerEvents = 'auto'; }
-  function disableBtn() { btn.disabled = true; }
-  function setBtnState(st){ btn.setAttribute('data-state', st); }
-  function log(){ try{ console.log.apply(console, ['[VishnuCast]'].concat([].slice.call(arguments))); }catch(_){} }
+    return { t:t, setLang:setLang, apply:applyTexts, get lang(){ return lang; } };
+  })();
+
+  // ---------- UI elements ----------
+  var btn = document.getElementById('btn');
+  var statusEl = document.getElementById('status');
+  var hintEl = document.getElementById('hint');
+  var audioEl = document.getElementById('audio');
+  var langRuBtn = document.getElementById('langRuBtn');
+  var langEnBtn = document.getElementById('langEnBtn');
 
   // ---------- State ----------
   var pc = null;
   var ws = null;
-  var state = 'idle'; // idle | connecting | connected | error
   var userStopped = false;
-  var pendingRemoteCandidates = [];
+  var state = 'idle'; // 'idle' | 'connecting' | 'connected'
+  var stopping = false;
+  var reofferTimer = null;
 
-  // ---------- URL helpers ----------
-  function buildWsPath() {
-    try {
-      var url = new URL(location.href);
-      var qp = url.searchParams.get('wspath');
-      if (qp) return qp.charAt(0) === '/' ? qp : '/' + qp;
-    } catch (_) {}
-    return '/ws';
+  // ---------- Language switches ----------
+  (function initLang(){
+    if (langRuBtn) langRuBtn.addEventListener('click', function(){ texts.setLang('ru'); setBtn(); setStatus(); });
+    if (langEnBtn) langEnBtn.addEventListener('click', function(){ texts.setLang('en'); setBtn(); setStatus(); });
+    texts.apply();
+  })();
+
+  // ---------- Button handler ----------
+  if (btn) {
+    btn.addEventListener('click', function(){
+      if (state === 'connected' || state === 'connecting') stopAll(true);
+      else start();
+    });
   }
-  function buildWsUrl() {
-    var proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-    return proto + '://' + location.host + buildWsPath();
-  }
 
-  // ---------- Cleanup ----------
-  function safeCloseWs() { try { if (ws) ws.close(); } catch (e) {} ws = null; }
-  function safeClosePc() { try { if (pc) pc.close(); } catch (e) {} pc = null; }
-  function resetBuffers() { pendingRemoteCandidates = []; }
-
-  function stopAll(manual) {
-    if (manual == null) manual = false;
-    userStopped = manual;
-    safeCloseWs();
-    safeClosePc();
-    resetBuffers();
-    state = 'idle';
-    setBtn();
-    setStatus(texts.disconnected);
-    log('Disconnected');
-  }
-  window.addEventListener('beforeunload', function () { stopAll(false); });
-
-  // ---------- ICE helpers ----------
-  function normalizeRemoteCandidate(msg) {
-    var cStr = null, mid = null, mline = null;
-    if (msg == null || typeof msg !== 'object') return null;
-
-    if (typeof msg.candidate === 'string') {
-      cStr = msg.candidate; mid = (typeof msg.sdpMid !== 'undefined') ? msg.sdpMid : null;
-      mline = (typeof msg.sdpMLineIndex === 'number') ? msg.sdpMLineIndex : 0;
-    } else if (typeof msg.sdp === 'string' && msg.sdp.indexOf('candidate:') === 0) {
-      cStr = msg.sdp; mid = (typeof msg.sdpMid !== 'undefined') ? msg.sdpMid : null;
-      mline = (typeof msg.sdpMLineIndex === 'number') ? msg.sdpMLineIndex : 0;
-    } else if (msg.candidate && typeof msg.candidate === 'object' && typeof msg.candidate.candidate === 'string') {
-      cStr = msg.candidate.candidate;
-      mid = (typeof msg.candidate.sdpMid !== 'undefined') ? msg.candidate.sdpMid : null;
-      mline = (typeof msg.candidate.sdpMLineIndex === 'number') ? msg.candidate.sdpMLineIndex : 0;
-    } else if (msg.ice && typeof msg.ice === 'object') {
-      if (typeof msg.ice.candidate === 'string') {
-        cStr = msg.ice.candidate;
-        mid = (typeof msg.ice.sdpMid !== 'undefined') ? msg.ice.sdpMid : null;
-        mline = (typeof msg.ice.sdpMLineIndex === 'number') ? msg.ice.sdpMLineIndex : 0;
-      } else if (msg.ice.candidate && typeof msg.ice.candidate === 'object' && typeof msg.ice.candidate.candidate === 'string') {
-        cStr = msg.ice.candidate.candidate;
-        mid = (typeof msg.ice.candidate.sdpMid !== 'undefined') ? msg.ice.candidate.sdpMid : null;
-        mline = (typeof msg.ice.candidate.sdpMLineIndex === 'number') ? msg.ice.candidate.sdpMLineIndex : 0;
-      }
+  // ---------- Helpers ----------
+  function setStatus(txt) {
+    if (!statusEl) return;
+    if (txt == null) {
+      txt = (state === 'connected') ? texts.t('status_connected')
+          : (state === 'connecting') ? texts.t('status_connecting') : texts.t('status_idle');
     }
-    if (!cStr || typeof cStr !== 'string' || cStr.trim() === '') return null;
-    var init = { candidate: cStr };
-    if (mid != null) init.sdpMid = mid;
-    if (typeof mline === 'number') init.sdpMLineIndex = mline;
-    return init;
-  }
-  function canAddRemoteCandidate() {
-    try { return !!(pc && pc.remoteDescription && pc.remoteDescription.type); } catch (_) { return false; }
-  }
-  function drainPendingCandidates() {
-    if (!canAddRemoteCandidate() || !pendingRemoteCandidates.length) return;
-    var queue = pendingRemoteCandidates.slice(); pendingRemoteCandidates = [];
-    for (var i = 0; i < queue.length; i++) {
-      (function (cand) {
-        pc.addIceCandidate(cand).catch(function (e) { log('addIceCandidate (drain) error:', e, cand); });
-      })(queue[i]);
-    }
+    statusEl.textContent = txt;
+    statusEl.classList.toggle('connected', state === 'connected');
   }
 
-  // ---------- Core connect (НЕ МЕНЯЕМ ПРОТОКОЛ) ----------
   function setBtn() {
+    if (!btn) return;
+    btn.disabled = (state === 'connecting');
+    while (btn.firstChild) btn.removeChild(btn.firstChild);
     if (state === 'connecting') {
-      btn.textContent = texts.connecting;
-      setBtnState('connecting');
-      disableBtn();
-    } else if (state === 'connected') {
-      btn.textContent = texts.btn_disconnect;
-      setBtnState('connected');
-      enableBtn();
-    } else { // idle/error
-      btn.textContent = texts.btn_connect;
-      setBtnState('idle');
-      enableBtn();
+      var sp = document.createElement('span'); sp.className = 'spin';
+      btn.appendChild(sp);
+      btn.appendChild(document.createTextNode(texts.t('connecting')));
+    } else {
+      btn.appendChild(document.createTextNode(state === 'connected' ? texts.t('disconnect') : texts.t('connect')));
+    }
+    if (state === 'connected') {
+      btn.style.backgroundColor = 'var(--vc-btn-on)';
+      btn.style.boxShadow = '0 1px 0 rgba(0,0,0,.05),0 6px 12px rgba(22,163,74,.25)';
+    } else {
+      btn.style.backgroundColor = 'var(--vc-btn)';
+      btn.style.boxShadow = '0 1px 0 rgba(0,0,0,.05),0 6px 12px rgba(37,99,235,.25)';
     }
   }
 
-  function connectOnce() {
-    if (state === 'connecting' || state === 'connected') return;
+  function log() {
+    if (window && window.console && console.log) console.log.apply(console, arguments);
+  }
 
+  function wsPathFromQuery() {
+    var q = location.search || '';
+    if (!q) return '/ws';
+    try {
+      var params = new URLSearchParams(q);
+      var p = params.get('wspath');
+      if (p && p[0] !== '/') p = '/' + p;
+      return p || '/ws';
+    } catch (_){ return '/ws'; }
+  }
+
+  function makeWsUrl() {
+    var proto = (location.protocol === 'https:') ? 'wss://' : 'ws://';
+    return proto + location.host + wsPathFromQuery();
+  }
+
+  function safeClosePc() {
+    try { if (pc) pc.ontrack = null; } catch(_){}
+    try { if (pc) pc.onicecandidate = null; } catch(_){}
+    try { if (pc && pc.signalingState !== 'closed') pc.close(); } catch(_){}
+    pc = null;
+  }
+
+  function safeCloseWs() {
+    try { if (ws && ws.readyState === 1) ws.close(); } catch(_){}
+    ws = null;
+  }
+
+  function resetBuffers(){}
+
+  function cancelReofferTimer(){
+    if (reofferTimer) { clearTimeout(reofferTimer); reofferTimer = null; }
+  }
+
+  // ---------- Start / Stop ----------
+  function start() {
+    if (state === 'connecting' || state === 'connected') return;
     userStopped = false;
+    stopping = false;
     state = 'connecting';
     setBtn();
-    setStatus(texts.connecting);
-    resetBuffers();
+    setStatus();
 
-    try {
-      pc = new RTCPeerConnection({ iceServers: [] });
-    } catch (e) {
-      log('RTCPeerConnection error:', e);
-      state = 'error'; setBtn(); setStatus(texts.err + ': RTCPeerConnection');
-      return;
-    }
+    var url = makeWsUrl();
+    log('[VC] connecting to', url);
+    ws = new WebSocket(url);
 
-    try { if (pc.addTransceiver) pc.addTransceiver('audio', { direction: 'recvonly' }); } catch (e) { log('addTransceiver error:', e); }
-
-    pc.ontrack = function (ev) {
-      try {
-        var stream = (ev.streams && ev.streams[0]) ? ev.streams[0] : null;
-        if (stream) {
-          audioEl.srcObject = stream;
-          var p = audioEl.play(); if (p && p.catch) p.catch(function () {});
-        }
-      } catch (e) { log('ontrack error:', e); }
+    ws.onopen = function(){
+      if (userStopped) { safeCloseWs(); return; }
+      log('[VC] ws open');
+      beginWebRtc();
     };
 
-    pc.onicecandidate = function (ev) {
-      try {
-        if (ev && ev.candidate && ws && ws.readyState === 1) { // 1=OPEN
-          var c = ev.candidate;
-          ws.send(JSON.stringify({
-            type: 'ice',
-            sdp: c.candidate,
-            sdpMid: c.sdpMid || null,
-            sdpMLineIndex: (typeof c.sdpMLineIndex === 'number') ? c.sdpMLineIndex : 0
-          }));
-        }
-      } catch (e) { log('onicecandidate send error:', e); }
+    ws.onclose = function(ev){
+      log('[VC] ws close', ev && ev.code, ev && ev.reason);
+      if (!userStopped) setStatus(texts.t('ws_closed'));
+      stopAll(false);
     };
 
-    var url = buildWsUrl();
-    log('WS →', url);
-    try { ws = new WebSocket(url); }
-    catch (e) { log('WebSocket ctor error:', e); state='error'; setBtn(); setStatus(texts.err + ': WS'); stopAll(false); return; }
-
-    ws.onopen = function () {
-      pc.createOffer({ offerToReceiveAudio: true }).then(function (offer) {
-        return pc.setLocalDescription(offer).then(function () {
-          ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
-        });
-      }).catch(function (e) {
-        log('Offer flow error:', e);
-        state = 'error'; setBtn(); setStatus(texts.err + ': offer'); stopAll(false);
-      });
+    ws.onerror = function(err){
+      log('[VC] ws error', err);
+      setStatus(texts.t('ws_error'));
     };
 
-    ws.onmessage = function (ev) {
-      try {
-        var msg = JSON.parse(ev.data);
-
-        if (msg && msg.type === 'answer' && typeof msg.sdp === 'string') {
-          pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp }).then(function () {
-            drainPendingCandidates();
-            state = 'connected'; setBtn(); setStatus(texts.connected);
-          }).catch(function (e) { log('setRemoteDescription error:', e); });
-          return;
-        }
-
-        if (msg && (msg.type === 'ice' || msg.type === 'candidate' || msg.ice)) {
-          var candInit = normalizeRemoteCandidate(msg);
-          if (!candInit) return;
-          if (canAddRemoteCandidate()) {
-            pc.addIceCandidate(candInit).catch(function (e) { log('addIceCandidate error:', e, candInit); });
-          } else {
-            pendingRemoteCandidates.push(candInit);
-          }
-          return;
-        }
-      } catch (e) { log('WS parse error:', e, ev && ev.data); }
+    ws.onmessage = function(ev){
+      handleSignal(ev.data);
     };
-
-    ws.onclose = function(){ log('WS close'); if (!userStopped) setStatus(texts.ws_closed); stopAll(false); };
-    ws.onerror = function(e){ log('WS error:', e); /* onclose сделает stopAll */ };
   }
 
-  // ---------- Toggle ----------
-  btn.addEventListener('click', function (ev) {
-    ev.preventDefault();
-    var p = audioEl.play(); if (p && p.catch) p.catch(function () {});
-    if (state === 'connected' || state === 'connecting') stopAll(true);
-    else connectOnce();
-  });
+  function stopAll(manual){
+    if (manual == null) manual = false;
+    if (stopping) return;
+    stopping = true;
 
-  // ---------- Init ----------
-  // Установим язык (автодетект / сохранённый), применим к UI
-  setLang(currentLang);
-  // Для статуса — вывесим "disconnected"
-  setStatus(TEXTS[currentLang].disconnected);
+    userStopped = manual;
+    cancelReofferTimer();
+    safeCloseWs();
+    safeClosePc();
+    try { audioEl.srcObject = null; } catch(_) {}
+    resetBuffers();
+
+    state = 'idle';
+    setBtn();
+    setStatus(texts.t('ws_closed'));
+    log('[VC] Disconnected');
+
+    stopping = false;
+  }
+
+  // ---------- Signaling helpers ----------
+  function isLikelySdpString(s){
+    return typeof s === 'string' && (s.startsWith('v=0') || s.indexOf('\nm=audio') >= 0 || s.indexOf('\na=') >= 0);
+  }
+
+  function handleSignal(raw){
+    try {
+      var msg = raw;
+      if (typeof raw === 'string') {
+        // Try JSON first
+        try { msg = JSON.parse(raw); } catch(_) { /* leave as string */ }
+      }
+
+      // 1) Plain SDP string (answer or offer)
+      if (isLikelySdpString(msg)) {
+        var desc = { type: (msg.indexOf('\na=fingerprint:') >= 0 ? (pc && pc.localDescription && pc.localDescription.type === 'offer' ? 'answer' : 'offer') : 'answer'), sdp: msg };
+        onRemoteSdp(desc);
+        return;
+      }
+
+      // 2) Object-based
+      if (msg && typeof msg === 'object') {
+        // Nested { sdp: {type, sdp} } or flat { type, sdp }
+        if (msg.sdp && (typeof msg.sdp === 'string' || (msg.sdp.type && msg.sdp.sdp))) {
+          var d = (typeof msg.sdp === 'string')
+            ? { type: (msg.type || 'answer'), sdp: msg.sdp }
+            : { type: (msg.sdp.type || 'answer'), sdp: msg.sdp.sdp };
+          onRemoteSdp(d);
+          return;
+        }
+        if (msg.type && msg.sdp) {
+          onRemoteSdp({ type: msg.type, sdp: msg.sdp });
+          return;
+        }
+        // ICE candidate(s): flat or nested, single or array
+        if (msg.candidate || msg.candidates) {
+          var arr = [];
+          if (msg.candidates && Array.isArray(msg.candidates)) arr = msg.candidates;
+          else arr = [msg];
+
+          arr.forEach(function(c){
+            var cand = c.candidate || c; // string or object
+            var init = (typeof cand === 'string')
+              ? { candidate: cand, sdpMid: c.sdpMid || 'audio', sdpMLineIndex: c.sdpMLineIndex || 0 }
+              : cand;
+            try { pc && pc.addIceCandidate(new RTCIceCandidate(init)); } catch(e){ log('[VC] addIceCandidate error', e); }
+          });
+          return;
+        }
+        if (msg.cmd === 'bye' || msg.bye) {
+          stopAll(false); return;
+        }
+        if (msg.needOffer || msg.cmd === 'need-offer') {
+          // server explicitly wants an offer
+          sendOffer();
+          return;
+        }
+      }
+    } catch (e) {
+      log('[VC] signaling parse error', e);
+    }
+  }
+
+  function onRemoteSdp(desc){
+    if (!pc) { log('[VC] no pc yet for remote SDP'); return; }
+    pc.setRemoteDescription(new RTCSessionDescription(desc)).then(function(){
+      log('[VC] setRemoteDescription OK', desc.type);
+      if (desc.type === 'offer') {
+        pc.createAnswer().then(function(ans){
+          return pc.setLocalDescription(ans);
+        }).then(function(){
+          sendAnswer();
+        }).catch(function(e){ log('[VC] answer error', e); });
+      } else {
+        // got answer → we are connected or about to connect
+      }
+    }).catch(function(e){
+      log('[VC] setRemoteDescription error', e);
+    });
+  }
+
+  // ---------- WebRTC ----------
+  function beginWebRtc(){
+    if (!ws || ws.readyState !== 1) { log('[VC] ws not open, abort start'); return; }
+
+    var conf = {
+      iceServers: [{ urls: ['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302'] }],
+      // sdpSemantics unified-plan by default in modern browsers
+    };
+    pc = new RTCPeerConnection(conf);
+
+    try { pc.addTransceiver('audio', { direction: 'recvonly' }); } catch(_){}
+
+    pc.onicecandidate = function(ev){
+      if (ev.candidate && ws && ws.readyState === 1) {
+        // send flat candidate; server may also accept nested — but flat is broadly compatible
+        ws.send(JSON.stringify({
+          candidate: ev.candidate.candidate,
+          sdpMid: ev.candidate.sdpMid,
+          sdpMLineIndex: ev.candidate.sdpMLineIndex
+        }));
+      }
+    };
+
+    pc.onconnectionstatechange = function(){
+      log('[VC] pc state:', pc.connectionState);
+      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        setStatus(texts.t('pc_failed'));
+        stopAll(false);
+      }
+    };
+
+    pc.ontrack = function(ev){
+      log('[VC] ontrack', ev && ev.streams && ev.streams[0]);
+      try {
+        if (ev.streams && ev.streams[0]) {
+          audioEl.srcObject = ev.streams[0];
+          audioEl.play().catch(function(e){ log('[VC] audio play failed', e); });
+        } else if (ev.track) {
+          var ms = new MediaStream([ev.track]);
+          audioEl.srcObject = ms;
+          audioEl.play().catch(function(e){ log('[VC] audio play failed', e); });
+        } else {
+          setStatus(texts.t('no_audio'));
+        }
+      } catch (e) {
+        log('[VC] attach audio error', e);
+        setStatus(texts.t('no_audio'));
+      }
+      state = 'connected';
+      setBtn();
+      setStatus();
+      cancelReofferTimer();
+    };
+
+    // Immediately send an OFFER (browser as offerer) — most common flow
+    sendOffer();
+
+    // If сервер молчит долго, переотправим оффер (на случай потери первого сообщения)
+    reofferTimer = setTimeout(function(){
+      if (state === 'connecting' && ws && ws.readyState === 1) {
+        log('[VC] re-sending offer after timeout');
+        sendOffer();
+      }
+    }, 4000);
+  }
+
+  function sendOffer(){
+    if (!pc) return;
+    pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false }).then(function(offer){
+      return pc.setLocalDescription(offer);
+    }).then(function(){
+      if (!ws || ws.readyState !== 1) return;
+      // Отправляем максимально совместимый формат:
+      // 1) nested {sdp:{type,sdp}}
+      ws.send(JSON.stringify({ sdp: pc.localDescription }));
+      // 2) flat {type,sdp} — некоторые сервера ждут именно так
+      ws.send(JSON.stringify({ type: pc.localDescription.type, sdp: pc.localDescription.sdp }));
+    }).catch(function(e){
+      log('[VC] createOffer error', e);
+      setStatus(texts.t('status_error'));
+      stopAll(false);
+    });
+  }
+
+  function sendAnswer(){
+    if (!pc || !pc.localDescription) return;
+    if (!ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ sdp: pc.localDescription }));
+    ws.send(JSON.stringify({ type: pc.localDescription.type, sdp: pc.localDescription.sdp }));
+  }
+
+  // ---------- Initialize UI ----------
   setBtn();
-  enableBtn();
+  setStatus();
 
-  // export for debug
-  window.VishnuCastClient = { connect: connectOnce, stop: function(){ stopAll(true); } };
 })();
