@@ -47,8 +47,6 @@ import android.view.View
 import android.net.wifi.WifiManager
 
 
-
-
 class MainActivity : AppCompatActivity() {
 
     companion object {
@@ -227,7 +225,6 @@ class MainActivity : AppCompatActivity() {
             else -> super.onOptionsItemSelected(item)
         }
     }
-
     private fun startCastService() {
         if (Build.VERSION.SDK_INT >= 26) {
             ContextCompat.startForegroundService(this, Intent(this, CastService::class.java))
@@ -236,12 +233,10 @@ class MainActivity : AppCompatActivity() {
         }
         updateUiRunning(true)
     }
-
     private fun stopCastService() {
         stopService(Intent(this, CastService::class.java))
         updateUiRunning(false)
     }
-
     private fun updateUiRunning(running: Boolean) {
         isRunning.set(running)
 
@@ -259,7 +254,6 @@ class MainActivity : AppCompatActivity() {
 
         updateInputBadge()
     }
-
     private fun hideArrowHint() {
         //fgAnim?.cancel()
         //fgAnim = null
@@ -268,7 +262,6 @@ class MainActivity : AppCompatActivity() {
         fgArrow = null
     }
     // -----------------------------------------------
-
     private fun updateClientsCount(count: Int) {
         val isRu = AppCompatDelegate.getApplicationLocales()
             ?.toLanguageTags()
@@ -276,7 +269,6 @@ class MainActivity : AppCompatActivity() {
             ?.startsWith("ru") == true
         tvClients.text = if (isRu) "Подключено клиентов: $count" else "Connected clients: $count"
     }
-
     private fun showLanguagePicker() {
         val items = arrayOf(getString(R.string.lang_ru), getString(R.string.lang_en))
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -294,7 +286,6 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
-
     private fun showNotificationsDeniedDialog() {
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.app_name))
@@ -308,9 +299,7 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
-
     private fun getLocalIpAddress(): String? = NetUtils.getLocalIpv4(this)
-
     private fun generateQrAsync(text: String, onReady: (Bitmap) -> Unit) {
         thread {
             try {
@@ -327,7 +316,6 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Throwable) { }
         }
     }
-
     private fun currentLangCode(): String {
         AppCompatDelegate.getApplicationLocales()?.toLanguageTags()?.let { tags ->
             if (tags.isNotEmpty()) return if (tags.lowercase(Locale.ROOT).startsWith("ru")) "ru" else "en"
@@ -338,9 +326,9 @@ class MainActivity : AppCompatActivity() {
         return if (sys != null && sys.language.lowercase(Locale.ROOT).startsWith("ru")) "ru" else "en"
     }
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-
     private fun applyIpToUi(ip: String?) {
-        val url = if (ip != null) "http://$ip:8080" else getString(R.string.placeholder_url)
+        val port = getServerPort()
+        val url = if (ip != null) "http://$ip:$port" else getString(R.string.placeholder_url)
         lastUrl = if (ip != null) url else null
 
         tvHint.text = getString(R.string.hint_open_url, url)
@@ -371,10 +359,7 @@ class MainActivity : AppCompatActivity() {
             ivQr.setImageDrawable(null)
         }
     }
-
-
     private enum class NetKind { AP, WIFI, ETH, OTHER }
-
     private fun detectNetKind(ip: String?): NetKind {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val active = cm.activeNetwork
@@ -418,12 +403,14 @@ class MainActivity : AppCompatActivity() {
 
         return NetKind.OTHER
     }
-
-
     private fun isPrivateIpv4(ip: String): Boolean =
         ip.startsWith("10.") ||
             ip.startsWith("192.168.") ||
             (ip.startsWith("172.") && ip.substringAfter("172.").substringBefore(".").toIntOrNull() in 16..31)
 
+    private fun getServerPort(): Int {
+        val sp = getSharedPreferences("vishnucast", Context.MODE_PRIVATE)
+        return sp.getInt("server_port", 8080)
+    }
 
 }

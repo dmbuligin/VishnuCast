@@ -15,9 +15,13 @@ import android.os.Build
 import android.os.IBinder
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.ServerSocket
 
 class CastService : Service() {
     private var server: VishnuServer? = null
+    private var boundPort: Int = 8080
 
     override fun onCreate() {
         super.onCreate()
@@ -26,14 +30,27 @@ class CastService : Service() {
         createNotificationChannelIfNeeded()
         startForeground(NOTIF_ID, buildRunningNotification())
 
-        // Стартуем VishnuServer (WS + HTTP) на :8080
+        // Выбираем доступный порт, начиная с 8080
+        val port = pickAvailablePort(8080, maxTries = 50)
+            ?: run {
+                Logger.e("CastService", "No free port in 8080..8129")
+                safeNotify(NOTIF_ID, buildErrorNotification("No free port (8080..8129)"))
+                stopSelf()
+                return
+            }
+
         try {
-            server = VishnuServer(applicationContext, 8080)
-            // удобная обёртка внутри класса: старт с таймаутом чтения сокета
+            boundPort = port
+            // Сохраним выбранный порт для UI (MainActivity прочитает из prefs)
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putInt(KEY_PORT, boundPort).apply()
+
+            // Стартуем VishnuServer (WS + HTTP) на выбранном порту
+            server = VishnuServer(applicationContext, boundPort)
             server?.launch(300_000, /*daemon=*/false)
-            Logger.i("CastService", "VishnuServer started on :8080")
+            Logger.i("CastService", "VishnuServer started on :$boundPort")
         } catch (e: Throwable) {
-            Logger.e("CastService", "Failed to start server on :8080", e)
+            Logger.e("CastService", "Failed to start server on :$boundPort", e)
             safeNotify(NOTIF_ID, buildErrorNotification("Server error: ${e.message ?: "unknown"}"))
             stopSelf()
             return
@@ -72,6 +89,29 @@ class CastService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    // -------------------- Port picking --------------------
+
+    private fun pickAvailablePort(start: Int, maxTries: Int): Int? {
+        for (p in start until (start + maxTries)) {
+            if (isTcpPortFree(p)) return p
+        }
+        return null
+    }
+
+    private fun isTcpPortFree(port: Int): Boolean {
+        var sock: ServerSocket? = null
+        return try {
+            sock = ServerSocket()
+            sock.reuseAddress = true
+            sock.bind(InetSocketAddress("0.0.0.0", port))
+            true
+        } catch (_: IOException) {
+            false
+        } finally {
+            try { sock?.close() } catch (_: Throwable) { }
+        }
+    }
 
     // -------------------- Notifications --------------------
 
@@ -165,5 +205,8 @@ class CastService : Service() {
 
         private const val CHANNEL_ID = "vishnucast_running"
         private const val NOTIF_ID = 1001
+
+        private const val PREFS = "vishnucast"
+        const val KEY_PORT = "server_port"
     }
 }
