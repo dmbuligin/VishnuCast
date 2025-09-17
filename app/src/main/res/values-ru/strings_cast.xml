@@ -83,6 +83,10 @@
     <string name="update_btn_open_release">Открыть страницу релиза</string>
     <string name="update_error">Не удалось проверить обновления</string>
 
+    <!-- Update notifications -->
+    <string name="upd_chan_name">Обновления VishnuCast</string>
+    <string name="upd_title">Доступно обновление: v%1$s</string>
+    <string name="upd_text">Нажмите, чтобы скачать и установить</string>
 
 
 </resources>

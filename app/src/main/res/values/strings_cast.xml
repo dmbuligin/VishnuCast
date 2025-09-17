@@ -87,5 +87,11 @@
     <string name="update_btn_open_release">Open release page</string>
     <string name="update_error">Update check failed</string>
 
+    <!-- Update notifications -->
+    <string name="upd_chan_name">VishnuCast updates</string>
+    <string name="upd_title">Update available: v%1$s</string>
+    <string name="upd_text">Tap to download &amp; install</string>
+
+
 
 </resources>

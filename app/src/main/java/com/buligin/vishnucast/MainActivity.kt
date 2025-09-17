@@ -46,6 +46,8 @@ import android.content.Context
 import android.view.View
 import android.net.wifi.WifiManager
 import android.net.Uri
+import androidx.work.WorkManager
+
 
 
 
@@ -53,7 +55,12 @@ import android.net.Uri
 
 
 class MainActivity : AppCompatActivity() {
-  //  private val MENU_ID_UPDATE = 1002
+
+    //private val ACTION_DOWNLOAD_UPDATE = "download_update"
+    //private val EXTRA_UPDATE_URL = "extra_update_url"
+    //private val EXTRA_UPDATE_NAME = "extra_update_name"
+    //private val EXTRA_UPDATE_VER = "extra_update_ver"
+
 
     companion object {
         private const val PREFS_NAME = "vishnucast_prefs"
@@ -195,6 +202,9 @@ class MainActivity : AppCompatActivity() {
 
         updateUiRunning(false)
         updateClientsCount(0)
+        UpdateCheckWorker.ensureScheduled(this)
+        intent?.let { handleUpdateIntent(it) }  // обработать, если пришли из уведомления
+
     }
 
     override fun onStart() {
@@ -242,9 +252,6 @@ class MainActivity : AppCompatActivity() {
         }
         else -> super.onOptionsItemSelected(item)
     }
-
-
-
     private fun startCastService() {
         if (Build.VERSION.SDK_INT >= 26) {
             ContextCompat.startForegroundService(this, Intent(this, CastService::class.java))
@@ -468,5 +475,24 @@ class MainActivity : AppCompatActivity() {
 
         b.show()
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleUpdateIntent(intent)
+    }
+
+
+    private fun handleUpdateIntent(i: Intent) {
+        if (i.action == UpdateProtocol.ACTION_DOWNLOAD_UPDATE) {
+            val url  = i.getStringExtra(UpdateProtocol.EXTRA_UPDATE_URL)
+            val name = i.getStringExtra(UpdateProtocol.EXTRA_UPDATE_NAME) ?: "VishnuCast-update.apk"
+            if (!url.isNullOrBlank()) {
+                ApkDownloader.downloadAndInstall(this, url, name)
+            }
+            // чтобы не повторялось при ротации/ре-запуске
+            i.action = null
+        }
+    }
+
 
 }

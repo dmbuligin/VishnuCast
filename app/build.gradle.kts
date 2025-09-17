@@ -104,20 +104,15 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.9.2")
     implementation("com.google.android.material:material:1.12.0")
-
     // Встроенный HTTP+WS сервер
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation("org.nanohttpd:nanohttpd-websocket:2.3.1")
-
     // QR-коды
     implementation("com.google.zxing:core:3.5.3")
-
     // WebRTC
     implementation("io.github.webrtc-sdk:android:137.7151.03")
-
-    // Тесты (если используешь JUnit 5)
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.13.4")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.13.4")
-
     implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
 }
