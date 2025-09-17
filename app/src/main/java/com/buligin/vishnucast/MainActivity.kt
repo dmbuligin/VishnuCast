@@ -52,6 +52,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_APP_LANG = "app_lang" // "ru" | "en"
     }
 
+    private var netMon: NetworkMonitor? = null
     private lateinit var arrowHint: HintArrowView
     private lateinit var tvStatus: TextView
     private lateinit var tvHint: TextView
@@ -176,16 +177,18 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        val ip = getLocalIpAddress()
-        val url = if (ip != null) "http://$ip:8080" else getString(R.string.placeholder_url)
-        lastUrl = if (ip != null) url else null
-        tvHint.text = getString(R.string.hint_open_url, url)
-        tvIp.text = getString(R.string.ip_fmt, ip ?: getString(R.string.ip_unknown))
-        if (ip != null) {
-            generateQrAsync(url) { bmp -> ivQr.setImageBitmap(bmp) }
-        } else {
-            ivQr.setImageBitmap(null)
-        }
+        applyIpToUi(getLocalIpAddress())
+
+//        val ip = getLocalIpAddress()
+//        val url = if (ip != null) "http://$ip:8080" else getString(R.string.placeholder_url)
+//        lastUrl = if (ip != null) url else null
+//        tvHint.text = getString(R.string.hint_open_url, url)
+//        tvIp.text = getString(R.string.ip_fmt, ip ?: getString(R.string.ip_unknown))
+//        if (ip != null) {
+//            generateQrAsync(url) { bmp -> ivQr.setImageBitmap(bmp) }
+//        } else {
+//            ivQr.setImageBitmap(null)
+//        }
 
         SignalLevel.live.observe(this) { level -> levelBar.progress = if (isRunning.get()) level.coerceIn(0, 100) else 0 }
         ClientCount.live.observe(this) { count -> updateClientsCount(count) }
@@ -198,6 +201,10 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
         updateUiRunning(CastService.isRunning)
+        netMon = NetworkMonitor(this) { newIp ->
+            runOnUiThread { applyIpToUi(newIp) }
+        }.also { it.start() }
+
     }
 
     override fun onStop() {
@@ -205,6 +212,9 @@ class MainActivity : AppCompatActivity() {
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         arrowHint.stopHint()
         hideArrowHint()
+        netMon?.stop()
+        netMon = null
+
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -331,6 +341,21 @@ class MainActivity : AppCompatActivity() {
         val sys = resources.configuration.locales[0]
         return if (sys != null && sys.language.lowercase(Locale.ROOT).startsWith("ru")) "ru" else "en"
     }
-
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun applyIpToUi(ip: String?) {
+        val url = if (ip != null) "http://$ip:8080" else getString(R.string.placeholder_url)
+        lastUrl = if (ip != null) url else null
+        tvHint.text = getString(R.string.hint_open_url, url)
+        tvIp.text = getString(R.string.ip_fmt, ip ?: getString(R.string.ip_unknown))
+
+        if (ip != null) {
+            generateQrAsync(url) { bmp -> ivQr.setImageBitmap(bmp) }
+        } else {
+            ivQr.setImageDrawable(null)
+        }
+    }
+
+
+
 }

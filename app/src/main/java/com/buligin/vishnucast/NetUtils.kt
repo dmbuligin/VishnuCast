@@ -78,8 +78,8 @@ object NetUtils {
     private fun rankIface(name: String): Int {
         val n = name.lowercase()
         return when {
-            n.startsWith("wlan") -> 0
-            n.startsWith("ap")   -> 1
+            n.startsWith("ap")   -> 0
+            n.startsWith("wlan") -> 1
             n.startsWith("eth")  -> 2
             else -> 10
         }
