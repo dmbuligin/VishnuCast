@@ -11,7 +11,7 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import android.Manifest
-import android.animation.ValueAnimator
+//import android.animation.ValueAnimator
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
@@ -27,15 +27,15 @@ import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
 import android.view.ViewTreeObserver
-import android.view.animation.LinearInterpolator
+//import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.content.res.AppCompatResources
-import androidx.core.graphics.drawable.DrawableCompat
+//import androidx.appcompat.content.res.AppCompatResources
+//import androidx.core.graphics.drawable.DrawableCompat
 import androidx.core.view.ViewCompat
 import androidx.core.widget.TextViewCompat
 import android.media.AudioDeviceCallback
@@ -64,7 +64,7 @@ class MainActivity : AppCompatActivity() {
 
     // Foreground-стрелка
     private var fgArrow: Drawable? = null
-    private var fgAnim: ValueAnimator? = null
+    //private var fgAnim: ValueAnimator? = null
 
     private val isRunning = AtomicBoolean(false)
     private var lastUrl: String? = null
@@ -255,8 +255,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hideArrowHint() {
-        fgAnim?.cancel()
-        fgAnim = null
+        //fgAnim?.cancel()
+        //fgAnim = null
         fgArrow?.alpha = 0
         sliderContainer.foreground = null
         fgArrow = null

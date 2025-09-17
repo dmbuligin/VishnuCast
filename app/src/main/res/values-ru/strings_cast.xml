@@ -9,9 +9,6 @@
     <!-- Buttons -->
     <string name="btn_start">Старт трансляции</string>
     <string name="btn_stop">Стоп</string>
-    <string name="slider_hint_start">Сдвинь для старта →</string>
-    <string name="slider_hint_stop">← Сдвинь для остановки</string>
-
 
     <!-- Hints -->
     <string name="hint_open_url">Откройте %1$s</string>

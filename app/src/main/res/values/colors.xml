@@ -7,4 +7,7 @@
     <color name="background_light">#F3F4F6</color> <!-- фон экрана -->
     <color name="text_primary">#111827</color> <!-- основной текст -->
     <color name="text_secondary">#6B7280</color> <!-- второстепенный текст -->
+    <color name="vc_red_600">#DC2626</color>
+
+
 </resources>
