@@ -19,6 +19,7 @@
     <!-- Menu -->
     <string name="menu_language">Язык</string>
     <string name="menu_about">О приложении</string>
+    <string name="menu_check_updates">Проверить обновления</string>
 
     <!-- Language dialog -->
     <string name="lang_title">Выберите язык</string>
@@ -72,6 +73,16 @@
     <string name="badge_wifi">Wi-Fi</string>
     <string name="badge_eth">ETH</string>
     <string name="badge_other">СЕТЬ</string>
+
+    <!-- Update checker -->
+    <string name="update_checking">Проверка обновлений…</string>
+    <string name="update_latest">У вас актуальная версия</string>
+    <string name="update_found_title">Доступно обновление</string>
+    <string name="update_found_msg">Новая версия: %1$s\n\n%2$s</string>
+    <string name="update_btn_download">Скачать и установить</string>
+    <string name="update_btn_open_release">Открыть страницу релиза</string>
+    <string name="update_error">Не удалось проверить обновления</string>
+
 
 
 </resources>

@@ -45,9 +45,15 @@ import android.net.NetworkCapabilities
 import android.content.Context
 import android.view.View
 import android.net.wifi.WifiManager
+import android.net.Uri
+
+
+
+
 
 
 class MainActivity : AppCompatActivity() {
+  //  private val MENU_ID_UPDATE = 1002
 
     companion object {
         private const val PREFS_NAME = "vishnucast_prefs"
@@ -217,14 +223,28 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return when (item.itemId) {
-            R.id.menu_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
-            R.id.action_language -> { showLanguagePicker(); true }
-            R.id.action_about -> { startActivity(Intent(this, AboutActivity::class.java)); true }
-            else -> super.onOptionsItemSelected(item)
+    override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.menu_settings -> {
+            startActivity(Intent(this, SettingsActivity::class.java))
+            true
         }
+        R.id.action_language -> {
+            showLanguagePicker()
+            true
+        }
+        R.id.action_check_updates -> {
+            checkForUpdates()
+            true
+        }
+        R.id.action_about -> {
+            startActivity(Intent(this, AboutActivity::class.java))
+            true
+        }
+        else -> super.onOptionsItemSelected(item)
     }
+
+
+
     private fun startCastService() {
         if (Build.VERSION.SDK_INT >= 26) {
             ContextCompat.startForegroundService(this, Intent(this, CastService::class.java))
@@ -411,6 +431,42 @@ class MainActivity : AppCompatActivity() {
     private fun getServerPort(): Int {
         val sp = getSharedPreferences("vishnucast", Context.MODE_PRIVATE)
         return sp.getInt("server_port", 8080)
+    }
+    private fun checkForUpdates() {
+        Toast.makeText(this, R.string.update_checking, Toast.LENGTH_SHORT).show()
+        UpdateChecker.checkLatest { result ->
+            result.onFailure {
+                Toast.makeText(this, R.string.update_error, Toast.LENGTH_LONG).show()
+            }.onSuccess { info ->
+                if (info == null) {
+                    Toast.makeText(this, R.string.update_latest, Toast.LENGTH_SHORT).show()
+                } else {
+                    showUpdateDialog(info)
+                }
+            }
+        }
+    }
+
+    private fun showUpdateDialog(info: UpdateChecker.ReleaseInfo) {
+        val body = info.body.trim().take(1200) // короткий changelog
+        val msg = getString(R.string.update_found_msg, info.versionName, body)
+
+        val b = AlertDialog.Builder(this)
+            .setTitle(R.string.update_found_title)
+            .setMessage(msg)
+            .setNegativeButton(R.string.update_btn_open_release) { _, _ ->
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.htmlUrl)))
+            }
+            .setNeutralButton(android.R.string.cancel, null)
+
+        if (info.downloadUrl != null && info.assetName != null) {
+            b.setPositiveButton(R.string.update_btn_download) { _, _ ->
+                val fn = info.assetName.ifBlank { "VishnuCast-${info.versionName}.apk" }
+                ApkDownloader.downloadAndInstall(this, info.downloadUrl, fn)
+            }
+        }
+
+        b.show()
     }
 
 }
