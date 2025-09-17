@@ -92,6 +92,7 @@
             android:textColor="#111827"
             android:textSize="14sp" />
 
+        <!-- Карточка с подсказкой URL и бейджем сети -->
         <LinearLayout
             android:orientation="vertical"
             android:layout_width="match_parent"
@@ -100,21 +101,24 @@
             android:background="@drawable/bg_info_card"
             android:padding="10dp">
 
-            <!-- IP + сетевой бейдж -->
+            <!-- Ряд: URL hint + сетевой бейдж в одной строке -->
             <LinearLayout
-                android:id="@+id/ipRow"
+                android:id="@+id/hintRow"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal">
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
                 <TextView
-                    android:id="@+id/tvIp"
+                    android:id="@+id/tvHint"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:textColor="#111827"
+                    android:textColor="#6B7280"
                     android:textSize="14sp"
-                    android:text="@string/ip_unknown" />
+                    android:singleLine="true"
+                    android:ellipsize="end"
+                    android:text="@string/hint_open_url" />
 
                 <TextView
                     android:id="@+id/tvNetBadge"
@@ -127,19 +131,14 @@
                     android:paddingBottom="2dp"
                     android:background="@drawable/bg_status_pill"
                     android:text="@string/badge_other"
+                    android:textStyle="bold"
                     android:textSize="12sp"
                     android:textColor="#111827" />
             </LinearLayout>
 
 
-            <TextView
-                android:id="@+id/tvHint"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:textColor="#6B7280"
-                android:textSize="14sp"
-                android:text="@string/hint_open_url" />
+
+
         </LinearLayout>
 
         <TextView

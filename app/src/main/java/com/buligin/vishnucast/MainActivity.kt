@@ -61,7 +61,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var arrowHint: HintArrowView
     private lateinit var tvStatus: TextView
     private lateinit var tvHint: TextView
-    private lateinit var tvIp: TextView
+   // private lateinit var tvIp: TextView
     private lateinit var tvClients: TextView
     private lateinit var ivQr: ImageView
     private lateinit var btnToggle: SeekBar
@@ -126,7 +126,7 @@ class MainActivity : AppCompatActivity() {
 
         tvStatus = findViewById(R.id.tvStatus)
         tvHint = findViewById(R.id.tvHint)
-        tvIp = findViewById(R.id.tvIp)
+        //tvIp = findViewById(R.id.tvIp)
         tvClients = findViewById(R.id.tvClients)
         ivQr = findViewById(R.id.ivQr)
         sliderContainer = findViewById(R.id.sliderContainer)
@@ -185,16 +185,6 @@ class MainActivity : AppCompatActivity() {
 
         applyIpToUi(getLocalIpAddress())
 
-//        val ip = getLocalIpAddress()
-//        val url = if (ip != null) "http://$ip:8080" else getString(R.string.placeholder_url)
-//        lastUrl = if (ip != null) url else null
-//        tvHint.text = getString(R.string.hint_open_url, url)
-//        tvIp.text = getString(R.string.ip_fmt, ip ?: getString(R.string.ip_unknown))
-//        if (ip != null) {
-//            generateQrAsync(url) { bmp -> ivQr.setImageBitmap(bmp) }
-//        } else {
-//            ivQr.setImageBitmap(null)
-//        }
 
         SignalLevel.live.observe(this) { level -> levelBar.progress = if (isRunning.get()) level.coerceIn(0, 100) else 0 }
         ClientCount.live.observe(this) { count -> updateClientsCount(count) }
@@ -354,10 +344,18 @@ class MainActivity : AppCompatActivity() {
         lastUrl = if (ip != null) url else null
 
         tvHint.text = getString(R.string.hint_open_url, url)
-        tvIp.text = getString(R.string.ip_fmt, ip ?: getString(R.string.ip_unknown))
+        //tvIp.text = getString(R.string.ip_fmt, ip ?: getString(R.string.ip_unknown))
 
         // Бейдж сети
         val kind = detectNetKind(ip)
+        val color = when (kind) {
+            NetKind.AP   -> 0xFFF59E0B.toInt()
+            NetKind.WIFI -> 0xFF2563EB.toInt()
+            NetKind.ETH  -> 0xFF6B7280.toInt()
+            NetKind.OTHER-> 0xFFE5E7EB.toInt()
+        }
+        tvNetBadge.background?.mutate()?.setTint(color)
+
         tvNetBadge.text = when (kind) {
             NetKind.AP   -> getString(R.string.badge_ap)
             NetKind.WIFI -> getString(R.string.badge_wifi)
