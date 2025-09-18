@@ -72,7 +72,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var arrowHint: HintArrowView
     private lateinit var tvStatus: TextView
     private lateinit var tvHint: TextView
-   // private lateinit var tvIp: TextView
     private lateinit var tvClients: TextView
     private lateinit var ivQr: ImageView
     private lateinit var btnToggle: SeekBar
@@ -137,7 +136,6 @@ class MainActivity : AppCompatActivity() {
 
         tvStatus = findViewById(R.id.tvStatus)
         tvHint = findViewById(R.id.tvHint)
-        //tvIp = findViewById(R.id.tvIp)
         tvClients = findViewById(R.id.tvClients)
         ivQr = findViewById(R.id.ivQr)
         sliderContainer = findViewById(R.id.sliderContainer)
@@ -359,7 +357,6 @@ class MainActivity : AppCompatActivity() {
         lastUrl = if (ip != null) url else null
 
         tvHint.text = getString(R.string.hint_open_url, url)
-        //tvIp.text = getString(R.string.ip_fmt, ip ?: getString(R.string.ip_unknown))
 
         // Бейдж сети
         val kind = detectNetKind(ip)
