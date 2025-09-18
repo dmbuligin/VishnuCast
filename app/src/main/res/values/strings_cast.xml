@@ -9,6 +9,8 @@
     <!-- Buttons -->
     <string name="btn_start">Start streaming</string>
     <string name="btn_stop">Stop</string>
+    <string name="hold_to_toggle">Hold to start/stop</string>
+
 
     <!-- Hints -->
     <string name="hint_open_url">Open %1$s</string>

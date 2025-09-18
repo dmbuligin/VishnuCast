@@ -29,7 +29,7 @@ import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.ProgressBar
-import android.widget.SeekBar
+//import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.view.ViewCompat
@@ -47,6 +47,7 @@ import android.view.View
 import android.net.wifi.WifiManager
 import android.net.Uri
 import androidx.work.WorkManager
+import android.widget.Button
 
 
 
@@ -74,7 +75,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvHint: TextView
     private lateinit var tvClients: TextView
     private lateinit var ivQr: ImageView
-    private lateinit var btnToggle: SeekBar
+    //private lateinit var btnToggle: SeekBar
+    private lateinit var btnToggle: Button
     private lateinit var levelBar: ProgressBar
     private lateinit var sliderContainer: FrameLayout
 
@@ -148,41 +150,36 @@ class MainActivity : AppCompatActivity() {
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         updateInputBadge()
 
-        btnToggle.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {}
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {
-                arrowHint.stopHint()
-                userIsTracking = true
-                hideArrowHint()
-            }
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                userIsTracking = false
-                val toStart = (btnToggle.progress >= 50)
-                if (toStart) {
-                    if (Build.VERSION.SDK_INT >= 33) {
-                        val notifGranted = ContextCompat.checkSelfPermission(
-                            this@MainActivity, Manifest.permission.POST_NOTIFICATIONS
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (!notifGranted) {
-                            updateUiRunning(false)
-                            requestPostNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            return
-                        }
-                    }
-                    val micGranted = ContextCompat.checkSelfPermission(
-                        this@MainActivity, Manifest.permission.RECORD_AUDIO
+        btnToggle.setOnLongClickListener {
+            if (!CastService.isRunning) {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    val notifGranted = ContextCompat.checkSelfPermission(
+                        this, Manifest.permission.POST_NOTIFICATIONS
                     ) == PackageManager.PERMISSION_GRANTED
-                    if (!micGranted) {
+                    if (!notifGranted) {
                         updateUiRunning(false)
-                        requestRecordAudio.launch(Manifest.permission.RECORD_AUDIO)
-                        return
+                        requestPostNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        return@setOnLongClickListener true
                     }
-                    startCastService()
-                } else {
-                    stopCastService()
                 }
+                val micGranted = ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+                if (!micGranted) {
+                    updateUiRunning(false)
+                    requestRecordAudio.launch(Manifest.permission.RECORD_AUDIO)
+                    return@setOnLongClickListener true
+                }
+                startCastService()
+            } else {
+                stopCastService()
             }
-        })
+            true
+        }
+        btnToggle.setOnClickListener {
+            Toast.makeText(this, getString(R.string.hold_to_toggle), Toast.LENGTH_SHORT).show()
+        }
+
 
         // После измерения контейнера — синхронизируем состояние и покажем подсказку
         sliderContainer.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
@@ -264,18 +261,14 @@ class MainActivity : AppCompatActivity() {
     }
     private fun updateUiRunning(running: Boolean) {
         isRunning.set(running)
-
-
-
-        if (!userIsTracking) btnToggle.progress = if (running) 100 else 0
+        btnToggle.text = getString(if (running) R.string.btn_stop else R.string.btn_start)
 
         tvStatus.text = getString(if (running) R.string.status_running else R.string.status_stopped)
         if (!running) levelBar.progress = 0
 
         val colorBg = if (running) Color.parseColor("#DC2626") else Color.parseColor("#2563EB")
         ViewCompat.setBackgroundTintList(btnToggle, ColorStateList.valueOf(colorBg))
-        arrowHint.setDirectionLeft(running)
-        arrowHint.startHint()
+        arrowHint.visibility = View.GONE
 
         updateInputBadge()
     }

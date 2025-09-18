@@ -9,6 +9,8 @@
     <!-- Buttons -->
     <string name="btn_start">Старт трансляции</string>
     <string name="btn_stop">Стоп</string>
+    <string name="hold_to_toggle">Удерживайте для старта/стопа</string>
+
 
     <!-- Hints -->
     <string name="hint_open_url">Откройте %1$s</string>

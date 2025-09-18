@@ -45,18 +45,15 @@
             android:clipChildren="false"
             android:clipToPadding="false">
 
-            <com.buligin.vishnucast.DragOnlySeekBar
+            <Button
                 android:id="@+id/btnToggle"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:background="@drawable/bg_status_pill"
-                android:progressDrawable="@drawable/slider_progress"
-                android:thumb="@drawable/slider_thumb"
-                android:max="100"
-                android:progress="0"
-                android:paddingLeft="0dp"
-                android:paddingRight="0dp"
-                android:thumbOffset="0dp" />
+                android:text="@string/btn_start"
+                android:textStyle="bold"
+                android:textColor="@android:color/white" />
+
 
             <com.buligin.vishnucast.HintArrowView
                 android:id="@+id/arrowHint"
