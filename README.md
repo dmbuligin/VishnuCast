@@ -40,11 +40,10 @@ git clone https://github.com/dmbuligin/VishnuCast.git
 
 * Open in **Android Studio** (compileSdk = 36, targetSdk = 34).
 * Build a **Release APK**.
-* Auto select a free port from 8080; WebRTC config is in project files.
 
 ### Usage
 1. Start the app on the lecturer’s phone (hotspot optional).
-2. Swipe to start/stop
+2. Long tap to button to start/stop server
 3. Audience opens `http://<your_IP>:8080` in a mobile browser.
 
 ### Notes
@@ -55,7 +54,7 @@ This project is licensed under the [MIT License](LICENSE).
 
 ### Screenshots
 <p align="center">
-  <img src="docs/screen12.jpg" alt="Main screen" width="250"/>
+  <img src="docs/screen13.jpg" alt="Main screen" width="250"/>
   <img src="docs/screen2.jpg" alt="Client page" width="250"/>
 </p>
 
@@ -100,11 +99,10 @@ git clone https://github.com/dmbuligin/VishnuCast.git
 ```
 * Откройте проект в **Android Studio** (compileSdk = 36, targetSdk = 34).
 * Соберите **Release APK**.
-* Автоматический выбор свободного порта из 8080; WebRTC-конфигурация в проекте.
 
 ### Использование
 1. Запустите приложение на телефоне лектора (можно с включённым хот-спотом).
-2. Сдвинте ползунок для старта/остановки
+2. Долгое нажатие кнопки для старта/остановки сервера
 3. Слушатели подключаются по адресу `http://<ваш_IP>:8080` в браузере.
 
 ### Замечания
@@ -119,7 +117,7 @@ git clone https://github.com/dmbuligin/VishnuCast.git
 
 ### Скриншоты
 <p align="left">
-    <img src="docs/screen12.jpg" alt="Главный экран" width="250"/>
+    <img src="docs/screen13.jpg" alt="Главный экран" width="250"/>
     <img src="docs/screen2.jpg" alt="Клиентская страница" width="250"/>
 </p>
 
