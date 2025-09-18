@@ -17,13 +17,14 @@ The server is built into the app (NanoHTTPD + WebRTC).
 
 A simple and convenient alternative to a radio microphone for lecturers or tour guides.
 
-- Port: **HTTP 8080**
+- Port: auto-select **HTTP 8080, 8081 ...**
 - Client: mobile browsers (iOS Safari, Android Chrome)
 - Package: `com.buligin.vishnucast`
 
 ### Features
 
 - Start/Stop broadcast from the lecturer’s phone
+- Automatic network selection: WiFi, AP, eth...
 - Shows local IP & QR code `http://IP:8080`
 - RU/EN UI
 - No app needed for listeners — browser only
@@ -44,14 +45,11 @@ git clone https://github.com/dmbuligin/VishnuCast.git
 
 * Build a **Release APK**.
 
-* Port 8080 is hardcoded; WebRTC config is in project files.
+* Select a free port from 8080; WebRTC config is in project files.
 
 ### Usage
-
 1. Start the app on the lecturer’s phone (hotspot optional).
-
-2. Tap **Start**.
-
+2. Swipe to start/stop
 3. Audience opens `http://<your_IP>:8080` in a mobile browser.
 
 ### Notes
@@ -65,7 +63,7 @@ This project is licensed under the [MIT License](LICENSE).
 ### Screenshots
 
 <p align="center">
-  <img src="docs/screen1.jpg" alt="Main screen" width="250"/>
+  <img src="docs/screen12.jpg" alt="Main screen" width="250"/>
   <img src="docs/screen2.jpg" alt="Client page" width="250"/>
 </p>
 
@@ -90,21 +88,17 @@ RU
 
 Простая и удобная альтернатива радиомикрофону для лекторов или экскурсоводов.
 
-* Порт: **HTTP 8080**
-
-* Клиент: мобильные браузеры (iOS Safari, Chrome на Android)
-
-* Пакет: `com.buligin.vishnucast`
+- Порт: автовыбор **HTTP 8080, 8081 ....**
+- Клиент: мобильные браузеры (iOS Safari, Chrome на Android)
+- Пакет: `com.buligin.vishnucast`
 
 ### Возможности
 
-* Старт/стоп трансляции с телефона-лектора
-
-* Отображение локального IP и QR-кода `http://IP:8080`
-
-* Двуязычный UI (RU/EN)
-
-* Минимальные требования к слушателям — только браузер
+- Старт/стоп трансляции с телефона-лектора
+- Автоматический выбор сети: WiFi, AP, eth...
+- Отображение локального IP и QR-кода `http://IP:8080`
+- Двуязычный UI (RU/EN)
+- Минимальные требования к слушателям — только браузер
 
 ###### Установка (APK)
 
@@ -130,7 +124,7 @@ git clone https://github.com/dmbuligin/VishnuCast.git
 
 1. Запустите приложение на телефоне лектора (можно с включённым хот-спотом).
 
-2. Нажмите **Старт трансляции**.
+2. Сдвинте ползунок для старта/остановки
 
 3. Слушатели подключаются по адресу `http://<ваш_IP>:8080` в браузере.
 
@@ -152,7 +146,7 @@ git clone https://github.com/dmbuligin/VishnuCast.git
 ### Скриншоты
 
 <p align="left">
-    <img src="docs/screen1.jpg" alt="Главный экран" width="250"/>
+    <img src="docs/screen12.jpg" alt="Главный экран" width="250"/>
     <img src="docs/screen2.jpg" alt="Клиентская страница" width="250"/>
 </p>
 
