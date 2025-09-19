@@ -7,12 +7,35 @@ import org.webrtc.IceCandidate
 import org.webrtc.SessionDescription
 import org.webrtc.SdpObserver
 
+/** Глобальный холдер единственного WebRtcCore на процесс */
+object WebRtcCoreHolder {
+    @Volatile private var instance: WebRtcCore? = null
+
+    fun get(ctx: android.content.Context): WebRtcCore {
+        instance?.let { return it }
+        synchronized(this) {
+            instance?.let { return it }
+            val core = WebRtcCore(ctx.applicationContext)
+            instance = core
+            return core
+        }
+    }
+
+    fun closeAndClear() {
+        synchronized(this) {
+            try { instance?.close() } catch (_: Throwable) {}
+            instance = null
+        }
+    }
+}
+
 class SignalingSocket(
     private val ctx: android.content.Context,
     handshake: NanoHTTPD.IHTTPSession
 ) : NanoWSD.WebSocket(handshake) {
 
-    private val webrtc = WebRtcCore(ctx)
+    // ✨ общий core на все сессии
+    private val webrtc = WebRtcCoreHolder.get(ctx)
     private var pc: org.webrtc.PeerConnection? = null
 
     override fun onOpen() {
@@ -28,9 +51,7 @@ class SignalingSocket(
             val text = message.textPayload ?: return
             Logger.d("VishnuWS", "RAW in: ${text.take(200)}")
             val obj = JSONObject(text)
-            val type = obj.optString("type", "")
-
-            when (type) {
+            when (obj.optString("type", "")) {
                 "ka" -> return
 
                 "ice" -> {
@@ -45,15 +66,11 @@ class SignalingSocket(
                 }
 
                 "offer" -> {
-                    // ack для наглядности
                     try { send(JSONObject().put("type", "ack").put("stage", "offer-received").toString()) } catch (_: Throwable) {}
-                    val sdp = obj.getString("sdp")
-                    handleOffer(sdp)
+                    handleOffer(obj.getString("sdp"))
                 }
 
-                else -> {
-                    Logger.w("VishnuWS", "Unknown message type: $type")
-                }
+                else -> Logger.w("VishnuWS", "Unknown message type: ${obj.optString("type", "")}")
             }
         } catch (e: Exception) {
             Logger.e("VishnuWS", "WS onMessage error", e)
@@ -63,6 +80,7 @@ class SignalingSocket(
 
     override fun onClose(code: NanoWSD.WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) {
         Logger.w("VishnuWS", "WS onClose: remote=$initiatedByRemote, reason=$reason, code=$code")
+        // Закрываем только peer — общий core остаётся жить для других клиентов
         try { pc?.close() } catch (_: Throwable) {}
         pc = null
     }
@@ -75,7 +93,6 @@ class SignalingSocket(
         Logger.d("VishnuWS", "handleOffer: OFFER len=${sdp.length}")
 
         pc = webrtc.createPeerConnection { cand ->
-            // отправляем «как было»: type:"ice" + nested candidate-объект
             val payload = JSONObject()
                 .put("sdpMid", cand.sdpMid)
                 .put("sdpMLineIndex", cand.sdpMLineIndex)
@@ -84,8 +101,7 @@ class SignalingSocket(
             try { send(ice.toString()) } catch (_: Throwable) {}
         }
 
-        val pcLocal = pc
-        if (pcLocal == null) {
+        val pcLocal = pc ?: run {
             val msg = "PeerConnection == null"
             Logger.e("VishnuWS", msg)
             try { send(JSONObject().put("type", "error").put("message", msg).toString()) } catch (_: Throwable) {}
@@ -95,13 +111,10 @@ class SignalingSocket(
         val remote = SessionDescription(SessionDescription.Type.OFFER, sdp)
         pcLocal.setRemoteDescription(object : SdpObserver {
             override fun onSetSuccess() {
-                Logger.d("VishnuWS", "setRemoteDescription OK → createAnswer")
                 pcLocal.createAnswer(object : SdpObserver {
                     override fun onCreateSuccess(desc: SessionDescription) {
-                        Logger.d("VishnuWS", "createAnswer OK, len=${desc.description.length}")
                         pcLocal.setLocalDescription(object : SdpObserver {
                             override fun onSetSuccess() {
-                                Logger.d("VishnuWS", "setLocalDescription OK → send ANSWER")
                                 try {
                                     send(JSONObject().put("type", "answer").put("sdp", desc.description).toString())
                                 } catch (_: Throwable) {}

@@ -141,4 +141,13 @@ class WebRtcCore(private val ctx: Context) {
             override fun onSetFailure(p0: String?) {}
         }, MediaConstraints())
     }
+
+    fun close() {
+        try { audioTrack.setEnabled(false) } catch (_: Throwable) {}
+        try { audioTrack.dispose() } catch (_: Throwable) {}
+        try { audioSource.dispose() } catch (_: Throwable) {}
+        try { factory.dispose() } catch (_: Throwable) {}
+        try { egl.release() } catch (_: Throwable) {}
+    }
+
 }
