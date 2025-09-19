@@ -351,10 +351,8 @@
   function beginWebRtc(){
     if (!ws || ws.readyState !== 1) { log('[VC] ws not open, abort start'); return; }
 
-    var conf = {
-      iceServers: [{ urls: ['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302'] }],
-      // sdpSemantics unified-plan by default in modern browsers
-    };
+    var conf = { iceServers: [] };
+    // sdpSemantics unified-plan by default in modern browsers
     pc = new RTCPeerConnection(conf);
 
     // >>> Добавлены диагностические логи ICE <<<
@@ -425,10 +423,7 @@
       return pc.setLocalDescription(offer);
     }).then(function(){
       if (!ws || ws.readyState !== 1) return;
-      // Отправляем максимально совместимый формат:
-      // 1) nested {sdp:{type,sdp}}
-      ws.send(JSON.stringify({ sdp: pc.localDescription }));
-      // 2) flat {type,sdp} — некоторые сервера ждут именно так
+      // Отправляем один оффер (flat)
       ws.send(JSON.stringify({ type: pc.localDescription.type, sdp: pc.localDescription.sdp }));
     }).catch(function(e){
       log('[VC] createOffer error', e);
@@ -440,6 +435,7 @@
   function sendAnswer(){
     if (!pc || !pc.localDescription) return;
     if (!ws || ws.readyState !== 1) return;
+    // Сохраним совместимость: шлём и nested, и flat (не критично, сервер игнорирует)
     ws.send(JSON.stringify({ sdp: pc.localDescription }));
     ws.send(JSON.stringify({ type: pc.localDescription.type, sdp: pc.localDescription.sdp }));
   }

@@ -79,7 +79,6 @@ class WebRtcCore(private val ctx: Context) {
                         SignalLevel.post(level)
 
                         if (probeStoppedByAdm.compareAndSet(false, true)) {
-                            // Первый рабочий сэмпл от WebRTC — выключаем локальный AudioRecord
                             MicLevelProbe.stop()
                         }
                     } catch (_: Throwable) { /* ignore */ }
@@ -93,7 +92,6 @@ class WebRtcCore(private val ctx: Context) {
             .setVideoDecoderFactory(decoder)
             .createPeerConnectionFactory()
 
-        // Медиаконтрейнты: софт-AEC/NS/AGC через goog* ключи
         val prefs = ctx.getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         val agcEnabled = prefs.getBoolean(KEY_AGC_ENABLED, true)
         val audioConstraints = MediaConstraints().apply {
@@ -110,14 +108,12 @@ class WebRtcCore(private val ctx: Context) {
     }
 
     fun createPeerConnection(onIce: (IceCandidate) -> Unit): PeerConnection? {
-        val rtcConfig = PeerConnection.RTCConfiguration(
-            listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
-        ).apply {
+        // HOST-ONLY (без STUN/TURN) для хотспота
+        val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
             iceTransportsType = PeerConnection.IceTransportsType.ALL
             tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
-            // disableLinkLocalNetworks нет в вашей версии org.webrtc → не используем.
         }
 
         val pcConnected = AtomicBoolean(false)
