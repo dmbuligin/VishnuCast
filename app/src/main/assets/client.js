@@ -1,8 +1,8 @@
-/* VishnuCast client — robust signaling (flat/nested), recv-only audio, RU/EN, single-button UI */
+/* VishnuCast client — quiet build (no logs), recv-only audio, single-button UI */
 (function () {
   'use strict';
 
-  // ---------- Inject minimal UI CSS ----------
+  // ---------- tiny UI CSS ----------
   (function injectStyles(){
     var css = [
       ':root{--vc-btn:#2563eb;--vc-btn-hover:#1d4ed8;--vc-btn-on:#16a34a;--vc-fg:#fff}',
@@ -50,13 +50,6 @@
         status_error: 'Error',
         hint_open: 'Open in your browser: ',
         ws_closed: 'Connection closed.',
-        ws_error: 'WebSocket error',
-        pc_failed: 'PeerConnection failed',
-        track_ended: 'Audio track ended',
-        no_audio: 'No audio track received',
-        lang_label: 'Language',
-        lang_ru: 'Рус',
-        lang_en: 'EN',
       },
       ru: {
         connect: 'Подключиться',
@@ -68,13 +61,6 @@
         status_error: 'Ошибка',
         hint_open: 'Откройте в браузере: ',
         ws_closed: 'Соединение закрыто.',
-        ws_error: 'Ошибка WebSocket',
-        pc_failed: 'Ошибка PeerConnection',
-        track_ended: 'Аудио-трек завершён',
-        no_audio: 'Аудио-трек не получен',
-        lang_label: 'Язык',
-        lang_ru: 'Рус',
-        lang_en: 'EN',
       }
     };
 
@@ -84,9 +70,6 @@
       var btn = document.getElementById('btn');
       var status = document.getElementById('status');
       var hint = document.getElementById('hint');
-      var langLabel = document.getElementById('langLabel');
-      var langRu = document.getElementById('langRu');
-      var langEn = document.getElementById('langEn');
 
       if (btn) btn.textContent = (state === 'connected') ? t('disconnect') : (state === 'connecting' ? t('connecting') : t('connect'));
       if (status) {
@@ -102,15 +85,12 @@
           hint.textContent = t('hint_open');
         }
       }
-      if (langLabel) langLabel.textContent = t('lang_label') + ':';
-      if (langRu) langRu.textContent = t('lang_ru');
-      if (langEn) langEn.textContent = t('lang_en');
     }
 
     return { t:t, setLang:setLang, apply:applyTexts, get lang(){ return lang; } };
   })();
 
-  // ---------- UI elements ----------
+  // ---------- elements ----------
   var btn = document.getElementById('btn');
   var statusEl = document.getElementById('status');
   var hintEl = document.getElementById('hint');
@@ -118,13 +98,16 @@
   var langRuBtn = document.getElementById('langRuBtn');
   var langEnBtn = document.getElementById('langEnBtn');
 
-  // ---------- State ----------
+  // ---------- state ----------
   var pc = null;
   var ws = null;
   var userStopped = false;
   var state = 'idle'; // 'idle' | 'connecting' | 'connected'
   var stopping = false;
   var reofferTimer = null;
+
+  // quiet logger (no output)
+  function log(){}
 
   // ---------- Language switches ----------
   (function initLang(){
@@ -172,10 +155,6 @@
     }
   }
 
-  function log() {
-    if (window && window.console && console.log) console.log.apply(console, arguments);
-  }
-
   function wsPathFromQuery() {
     var q = location.search || '';
     if (!q) return '/ws';
@@ -205,25 +184,20 @@
   }
 
   function resetBuffers(){}
-
-  function cancelReofferTimer(){
-    if (reofferTimer) { clearTimeout(reofferTimer); reofferTimer = null; }
-  }
+  function cancelReofferTimer(){ if (reofferTimer) { clearTimeout(reofferTimer); reofferTimer = null; } }
 
   // ---------- Start / Stop ----------
   function start() {
     if (state === 'connecting' || state === 'connected') return;
 
-// Разблокируем аудио-д движок в рамках жеста пользователя
-  try {
-    if (window.AudioContext || window.webkitAudioContext) {
-      var AC = window.AudioContext || window.webkitAudioContext;
-      if (!window.__vc_ac) window.__vc_ac = new AC();
-      if (window.__vc_ac.state === 'suspended') {
-        window.__vc_ac.resume().catch(()=>{});
+    // Разблокируем аудио-д движок в рамках жеста пользователя
+    try {
+      if (window.AudioContext || window.webkitAudioContext) {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!window.__vc_ac) window.__vc_ac = new AC();
+        if (window.__vc_ac.state === 'suspended') { window.__vc_ac.resume().catch(()=>{}); }
       }
-    }
-  } catch(_) {}
+    } catch(_) {}
 
     userStopped = false;
     stopping = false;
@@ -232,24 +206,20 @@
     setStatus();
 
     var url = makeWsUrl();
-    log('[VC] connecting to', url);
     ws = new WebSocket(url);
 
     ws.onopen = function(){
       if (userStopped) { safeCloseWs(); return; }
-      log('[VC] ws open');
       beginWebRtc();
     };
 
-    ws.onclose = function(ev){
-      log('[VC] ws close', ev && ev.code, ev && ev.reason);
+    ws.onclose = function(){
       if (!userStopped) setStatus(texts.t('ws_closed'));
       stopAll(false);
     };
 
-    ws.onerror = function(err){
-      log('[VC] ws error', err);
-      setStatus(texts.t('ws_error'));
+    ws.onerror = function(){
+      setStatus(texts.t('status_error'));
     };
 
     ws.onmessage = function(ev){
@@ -272,35 +242,29 @@
     state = 'idle';
     setBtn();
     setStatus(texts.t('ws_closed'));
-    log('[VC] Disconnected');
 
     stopping = false;
   }
 
-  // ---------- Signaling helpers ----------
+  // ---------- Signaling ----------
   function isLikelySdpString(s){
     return typeof s === 'string' && (s.startsWith('v=0') || s.indexOf('\nm=audio') >= 0 || s.indexOf('\na=') >= 0);
   }
 
   function handleSignal(raw){
     try {
-      try { log('[VC] sig in:', raw); } catch(_) {}
       var msg = raw;
       if (typeof raw === 'string') {
-        // Try JSON first
         try { msg = JSON.parse(raw); } catch(_) { /* leave as string */ }
       }
 
-      // 1) Plain SDP string (answer or offer)
       if (isLikelySdpString(msg)) {
         var desc = { type: (msg.indexOf('\na=fingerprint:') >= 0 ? (pc && pc.localDescription && pc.localDescription.type === 'offer' ? 'answer' : 'offer') : 'answer'), sdp: msg };
         onRemoteSdp(desc);
         return;
       }
 
-      // 2) Object-based
       if (msg && typeof msg === 'object') {
-        // Nested { sdp: {type, sdp} } or flat { type, sdp }
         if (msg.sdp && (typeof msg.sdp === 'string' || (msg.sdp.type && msg.sdp.sdp))) {
           var d = (typeof msg.sdp === 'string')
             ? { type: (msg.type || 'answer'), sdp: msg.sdp }
@@ -312,72 +276,48 @@
           onRemoteSdp({ type: msg.type, sdp: msg.sdp });
           return;
         }
-        // ICE candidate(s): flat or nested, single or array
         if (msg.candidate || msg.candidates) {
           var arr = [];
           if (msg.candidates && Array.isArray(msg.candidates)) arr = msg.candidates;
           else arr = [msg];
 
           arr.forEach(function(c){
-            var cand = c.candidate || c; // string or object
+            var cand = c.candidate || c;
             var init = (typeof cand === 'string')
               ? { candidate: cand, sdpMid: c.sdpMid || 'audio', sdpMLineIndex: c.sdpMLineIndex || 0 }
               : cand;
-            try { pc && pc.addIceCandidate(new RTCIceCandidate(init)); } catch(e){ log('[VC] addIceCandidate error', e); }
+            try { pc && pc.addIceCandidate(new RTCIceCandidate(init)); } catch(e){}
           });
           return;
         }
-        if (msg.cmd === 'bye' || msg.bye) {
-          stopAll(false); return;
-        }
-        if (msg.needOffer || msg.cmd === 'need-offer') {
-          // server explicitly wants an offer
-          sendOffer();
-          return;
-        }
+        if (msg.cmd === 'bye' || msg.bye) { stopAll(false); return; }
+        if (msg.needOffer || msg.cmd === 'need-offer') { sendOffer(); return; }
       }
-    } catch (e) {
-      log('[VC] signaling parse error', e);
-    }
+    } catch (_){}
   }
 
   function onRemoteSdp(desc){
-    if (!pc) { log('[VC] no pc yet for remote SDP'); return; }
+    if (!pc) { return; }
     pc.setRemoteDescription(new RTCSessionDescription(desc)).then(function(){
-      log('[VC] setRemoteDescription OK', desc.type);
       if (desc.type === 'offer') {
         pc.createAnswer().then(function(ans){
           return pc.setLocalDescription(ans);
-        }).then(function(){
-          sendAnswer();
-        }).catch(function(e){ log('[VC] answer error', e); });
-      } else {
-        // got answer → we are connected or about to connect
+        }).then(function(){ sendAnswer(); }).catch(function(){});
       }
-    }).catch(function(e){
-      log('[VC] setRemoteDescription error', e);
-    });
+    }).catch(function(){});
   }
 
   // ---------- WebRTC ----------
   function beginWebRtc(){
-    if (!ws || ws.readyState !== 1) { log('[VC] ws not open, abort start'); return; }
+    if (!ws || ws.readyState !== 1) { return; }
 
     var conf = { iceServers: [] };
-    // sdpSemantics unified-plan by default in modern browsers
     pc = new RTCPeerConnection(conf);
-
-    // >>> Добавлены диагностические логи ICE <<<
-    pc.addEventListener('iceconnectionstatechange', ()=>console.log('[VC] ice:', pc.iceConnectionState));
-    pc.addEventListener('icegatheringstatechange', ()=>console.log('[VC] iceGather:', pc.iceGatheringState));
-    // <<< конец вставки >>>
 
     try { pc.addTransceiver('audio', { direction: 'recvonly' }); } catch(_){}
 
     pc.onicecandidate = function(ev){
       if (ev.candidate && ws && ws.readyState === 1) {
-        log('[VC] local ICE cand:', ev.candidate.candidate);
-        // send flat candidate; server may also accept nested — but flat is broadly compatible
         ws.send(JSON.stringify({
           candidate: ev.candidate.candidate,
           sdpMid: ev.candidate.sdpMid,
@@ -387,66 +327,44 @@
     };
 
     pc.onconnectionstatechange = function(){
-      log('[VC] pc state:', pc.connectionState);
       if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-        setStatus(texts.t('pc_failed'));
+        setStatus(texts.t('status_error'));
         stopAll(false);
       }
     };
 
-   pc.ontrack = function(ev){
-     log('[VC] ontrack', ev && ev.streams && ev.streams[0]);
-     try {
-       var stream = (ev.streams && ev.streams[0])
-         ? ev.streams[0]
-         : (ev.track ? new MediaStream([ev.track]) : null);
-       if (stream) {
-         // подстрахуем атрибуты и громкость
-         audioEl.setAttribute('playsinline', '');
-         audioEl.setAttribute('autoplay', '');
-         audioEl.muted = false;
-         audioEl.volume = 1.0;
-         audioEl.srcObject = stream;
+    pc.ontrack = function(ev){
+      try {
+        var stream = (ev.streams && ev.streams[0])
+          ? ev.streams[0]
+          : (ev.track ? new MediaStream([ev.track]) : null);
+        if (stream) {
+          audioEl.setAttribute('playsinline', '');
+          audioEl.setAttribute('autoplay', '');
+          audioEl.muted = false;
+          audioEl.volume = 1.0;
+          audioEl.srcObject = stream;
 
-         // несколько попыток воспроизвести
-         let tries = 0;
-         (function kick(){
-           audioEl.play().then(function(){
-             log('[VC] audio playing');
-           }).catch(function(e){
-             tries++;
-             if (tries < 3) {
-               log('[VC] audio play retry', tries, e && e.name);
-               setTimeout(kick, 300);
-             } else {
-               log('[VC] audio play failed', e);
-             }
-           });
-         })();
-       } else {
-         setStatus(texts.t('no_audio'));
-       }
-     } catch (e) {
-       log('[VC] attach audio error', e);
-       setStatus(texts.t('no_audio'));
-     }
+          let tries = 0;
+          (function kick(){
+            audioEl.play().catch(function(){
+              tries++;
+              if (tries < 3) setTimeout(kick, 300);
+            });
+          })();
+        }
+      } catch (_) {}
 
-     state = 'connected';
-     setBtn();
-     setStatus();
-     cancelReofferTimer();
-   };
+      state = 'connected';
+      setBtn();
+      setStatus();
+      cancelReofferTimer();
+    };
 
-
-    // Immediately send an OFFER (browser as offerer) — most common flow
     sendOffer();
 
-    // If сервер молчит долго, переотправим оффер (на случай потери первого сообщения)
     reofferTimer = setTimeout(function(){
-      if (state === 'connecting' && ws && ws.readyState === 1) {
-        log('[VC] re-sending offer after timeout');
-        sendOffer();
-      }
+      if (state === 'connecting' && ws && ws.readyState === 1) { sendOffer(); }
     }, 4000);
   }
 
@@ -456,10 +374,8 @@
       return pc.setLocalDescription(offer);
     }).then(function(){
       if (!ws || ws.readyState !== 1) return;
-      // Отправляем один оффер (flat)
       ws.send(JSON.stringify({ type: pc.localDescription.type, sdp: pc.localDescription.sdp }));
-    }).catch(function(e){
-      log('[VC] createOffer error', e);
+    }).catch(function(){
       setStatus(texts.t('status_error'));
       stopAll(false);
     });
@@ -468,13 +384,11 @@
   function sendAnswer(){
     if (!pc || !pc.localDescription) return;
     if (!ws || ws.readyState !== 1) return;
-    // Сохраним совместимость: шлём и nested, и flat (не критично, сервер игнорирует)
     ws.send(JSON.stringify({ sdp: pc.localDescription }));
     ws.send(JSON.stringify({ type: pc.localDescription.type, sdp: pc.localDescription.sdp }));
   }
 
-  // ---------- Initialize UI ----------
+  // ---------- init ----------
   setBtn();
   setStatus();
-
 })();

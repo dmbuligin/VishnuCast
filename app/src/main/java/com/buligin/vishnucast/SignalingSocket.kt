@@ -34,22 +34,16 @@ class SignalingSocket(
     handshake: NanoHTTPD.IHTTPSession
 ) : NanoWSD.WebSocket(handshake) {
 
-    // ✨ общий core на все сессии
     private val webrtc = WebRtcCoreHolder.get(ctx)
     private var pc: org.webrtc.PeerConnection? = null
 
-    override fun onOpen() {
-        Logger.d("VishnuWS", "WS onOpen")
-    }
+    override fun onOpen() {}
 
-    override fun onPong(pong: NanoWSD.WebSocketFrame?) {
-        Logger.d("VishnuWS", "WS onPong")
-    }
+    override fun onPong(pong: NanoWSD.WebSocketFrame?) {}
 
     override fun onMessage(message: NanoWSD.WebSocketFrame) {
         try {
             val text = message.textPayload ?: return
-            Logger.d("VishnuWS", "RAW in: ${text.take(200)}")
             val obj = JSONObject(text)
             when (obj.optString("type", "")) {
                 "ka" -> return
@@ -61,7 +55,6 @@ class SignalingSocket(
                         cObj.optInt("sdpMLineIndex", 0),
                         cObj.optString("candidate", "")
                     )
-                    Logger.d("VishnuWS", "ICE from client: ${c.sdp.take(64)}")
                     pc?.addIceCandidate(c)
                 }
 
@@ -70,28 +63,21 @@ class SignalingSocket(
                     handleOffer(obj.getString("sdp"))
                 }
 
-                else -> Logger.w("VishnuWS", "Unknown message type: ${obj.optString("type", "")}")
+                else -> {}
             }
-        } catch (e: Exception) {
-            Logger.e("VishnuWS", "WS onMessage error", e)
-            try { send(JSONObject().put("type", "error").put("message", e.message ?: "unknown").toString()) } catch (_: Throwable) {}
+        } catch (_: Exception) {
+            try { send(JSONObject().put("type", "error").put("message", "bad message").toString()) } catch (_: Throwable) {}
         }
     }
 
     override fun onClose(code: NanoWSD.WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) {
-        Logger.w("VishnuWS", "WS onClose: remote=$initiatedByRemote, reason=$reason, code=$code")
-        // Закрываем только peer — общий core остаётся жить для других клиентов
         try { pc?.close() } catch (_: Throwable) {}
         pc = null
     }
 
-    override fun onException(exception: java.io.IOException?) {
-        Logger.e("VishnuWS", "WS onException", exception)
-    }
+    override fun onException(exception: java.io.IOException?) {}
 
     private fun handleOffer(sdp: String) {
-        Logger.d("VishnuWS", "handleOffer: OFFER len=${sdp.length}")
-
         pc = webrtc.createPeerConnection { cand ->
             val payload = JSONObject()
                 .put("sdpMid", cand.sdpMid)
@@ -102,9 +88,7 @@ class SignalingSocket(
         }
 
         val pcLocal = pc ?: run {
-            val msg = "PeerConnection == null"
-            Logger.e("VishnuWS", msg)
-            try { send(JSONObject().put("type", "error").put("message", msg).toString()) } catch (_: Throwable) {}
+            try { send(JSONObject().put("type", "error").put("message", "pc-null").toString()) } catch (_: Throwable) {}
             return
         }
 
@@ -120,24 +104,21 @@ class SignalingSocket(
                                 } catch (_: Throwable) {}
                             }
                             override fun onSetFailure(p0: String?) {
-                                Logger.e("VishnuWS", "setLocalDescription FAIL: $p0")
-                                try { send(JSONObject().put("type", "error").put("message", "setLocalDescription: $p0").toString()) } catch (_: Throwable) {}
+                                try { send(JSONObject().put("type", "error").put("message", "setLocalDescription").toString()) } catch (_: Throwable) {}
                             }
                             override fun onCreateSuccess(p0: SessionDescription?) {}
                             override fun onCreateFailure(p0: String?) {}
                         }, desc)
                     }
                     override fun onCreateFailure(p0: String?) {
-                        Logger.e("VishnuWS", "createAnswer FAIL: $p0")
-                        try { send(JSONObject().put("type", "error").put("message", "createAnswer: $p0").toString()) } catch (_: Throwable) {}
+                        try { send(JSONObject().put("type", "error").put("message", "createAnswer").toString()) } catch (_: Throwable) {}
                     }
                     override fun onSetSuccess() {}
                     override fun onSetFailure(p0: String?) {}
                 }, org.webrtc.MediaConstraints())
             }
             override fun onSetFailure(p0: String?) {
-                Logger.e("VishnuWS", "setRemoteDescription FAIL: $p0")
-                try { send(JSONObject().put("type", "error").put("message", "setRemoteDescription: $p0").toString()) } catch (_: Throwable) {}
+                try { send(JSONObject().put("type", "error").put("message", "setRemoteDescription").toString()) } catch (_: Throwable) {}
             }
             override fun onCreateSuccess(p0: SessionDescription?) {}
             override fun onCreateFailure(p0: String?) {}
