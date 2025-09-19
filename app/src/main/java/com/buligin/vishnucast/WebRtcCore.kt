@@ -38,7 +38,7 @@ class WebRtcCore(private val ctx: Context) {
     }
 
     init {
-        // ВАЖНО: PeerConnectionFactory.initialize(...) уже вызван в App.onCreate() с fieldTrials WebRTC-MDNS/Disabled/
+        // ВАЖНО: PeerConnectionFactory.initialize(...) уже вызван в App.onCreate() c WebRTC-MDNS/Disabled/
         val encoder = DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true)
         val decoder = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
 
@@ -117,7 +117,7 @@ class WebRtcCore(private val ctx: Context) {
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
             iceTransportsType = PeerConnection.IceTransportsType.ALL
             tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
-            // disableLinkLocalNetworks отсутствует в вашей версии org.webrtc → не используем.
+            // disableLinkLocalNetworks нет в вашей версии org.webrtc → не используем.
         }
 
         val pcConnected = AtomicBoolean(false)
