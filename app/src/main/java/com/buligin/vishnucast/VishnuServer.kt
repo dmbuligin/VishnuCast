@@ -17,6 +17,7 @@ class VishnuServer(
     }
 
     override fun serve(session: NanoHTTPD.IHTTPSession): Response {
+
         // Разруливаем WebSocket-апгрейд только на /ws
         @Suppress("DEPRECATION")
         if (session.uri == "/ws" && isWebsocketRequested(session)) {
@@ -45,10 +46,12 @@ class VishnuServer(
     fun launch(socketReadTimeoutMs: Int, daemon: Boolean) {
         Logger.i("VishnuWS", "Starting VishnuServer on :$listeningPort timeout=${socketReadTimeoutMs}ms")
         start(socketReadTimeoutMs, daemon)
+        ClientCounterStable.reset()
     }
 
     fun shutdown() {
         Logger.i("VishnuWS", "Stopping VishnuServer")
+        ClientCounterStable.reset()
         stop()
     }
 }

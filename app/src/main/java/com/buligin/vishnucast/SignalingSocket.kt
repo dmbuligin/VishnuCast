@@ -6,11 +6,14 @@ import org.json.JSONObject
 import org.webrtc.IceCandidate
 import org.webrtc.SessionDescription
 import org.webrtc.SdpObserver
+import java.util.Timer
+import java.util.TimerTask
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Глобальный холдер единственного WebRtcCore на процесс */
 object WebRtcCoreHolder {
     @Volatile private var instance: WebRtcCore? = null
-
     fun get(ctx: android.content.Context): WebRtcCore {
         instance?.let { return it }
         synchronized(this) {
@@ -20,13 +23,16 @@ object WebRtcCoreHolder {
             return core
         }
     }
+    fun closeAndClear() { synchronized(this) { try { instance?.close() } catch (_: Throwable) {} ; instance = null } }
+}
 
-    fun closeAndClear() {
-        synchronized(this) {
-            try { instance?.close() } catch (_: Throwable) {}
-            instance = null
-        }
-    }
+/** Устойчивый счётчик клиентов (живёт в процессе) */
+object ClientCounterStable {
+    private val n = AtomicInteger(0)
+    fun inc() { val v = n.incrementAndGet(); ClientCount.post(v) }
+    fun dec() { val v = n.decrementAndGet().coerceAtLeast(0); ClientCount.post(v) }
+    fun reset() { n.set(0); ClientCount.post(0) }
+    fun value(): Int = n.get()
 }
 
 class SignalingSocket(
@@ -36,6 +42,10 @@ class SignalingSocket(
 
     private val webrtc = WebRtcCoreHolder.get(ctx)
     private var pc: org.webrtc.PeerConnection? = null
+
+    // учёт состояния «засчитан в счётчик»
+    private val counted = AtomicBoolean(false)
+    private var pollTimer: Timer? = null
 
     override fun onOpen() {}
 
@@ -71,6 +81,11 @@ class SignalingSocket(
     }
 
     override fun onClose(code: NanoWSD.WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) {
+        stopPolling()
+        // если подключение было засчитано — уменьшаем
+        if (counted.compareAndSet(true, false)) {
+            ClientCounterStable.dec()
+        }
         try { pc?.close() } catch (_: Throwable) {}
         pc = null
     }
@@ -91,6 +106,9 @@ class SignalingSocket(
             try { send(JSONObject().put("type", "error").put("message", "pc-null").toString()) } catch (_: Throwable) {}
             return
         }
+
+        // запускаем мягкий поллинг ICE-состояния, чтобы зафиксировать CONNECTED
+        startPollingIceConnected()
 
         val remote = SessionDescription(SessionDescription.Type.OFFER, sdp)
         pcLocal.setRemoteDescription(object : SdpObserver {
@@ -123,5 +141,32 @@ class SignalingSocket(
             override fun onCreateSuccess(p0: SessionDescription?) {}
             override fun onCreateFailure(p0: String?) {}
         }, remote)
+    }
+
+    private fun startPollingIceConnected() {
+        stopPolling()
+        val localPc = pc ?: return
+        pollTimer = Timer("vc-icepoll", true).apply {
+            schedule(object : TimerTask() {
+                override fun run() {
+                    val cur = pc ?: return
+                    val st = try { cur.iceConnectionState() } catch (_: Throwable) { null }
+                    if (st == org.webrtc.PeerConnection.IceConnectionState.CONNECTED) {
+                        if (counted.compareAndSet(false, true)) {
+                            ClientCounterStable.inc()
+                        }
+                        stopPolling()
+                    } else if (st == org.webrtc.PeerConnection.IceConnectionState.FAILED
+                        || st == org.webrtc.PeerConnection.IceConnectionState.CLOSED) {
+                        stopPolling()
+                    }
+                }
+            }, 0L, 200L)
+        }
+    }
+
+    private fun stopPolling() {
+        try { pollTimer?.cancel() } catch (_: Throwable) {}
+        pollTimer = null
     }
 }
