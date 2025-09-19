@@ -23,8 +23,8 @@ A simple and convenient alternative to a radio microphone for lecturers or tour 
 
 ### Features
 - Start/Stop broadcast from the lecturer’s phone
-- Automatic network selection: WiFi, AP, eth...
 - Shows local IP & QR code `http://IP:8080`
+- Refresh  IP & QR code by pull-to-refresh
 - RU/EN UI
 - No app needed for listeners — browser only
 
@@ -42,7 +42,7 @@ git clone https://github.com/dmbuligin/VishnuCast.git
 * Build a **Release APK**.
 
 ### Usage
-1. Start the app on the lecturer’s phone (hotspot optional).
+1. Start the app on the lecturer’s phone in wifi or own hotspot.
 2. Long tap to button to start/stop server
 3. Audience opens `http://<your_IP>:8080` in a mobile browser.
 
@@ -83,8 +83,8 @@ RU
 
 ### Возможности
 - Старт/стоп трансляции с телефона-лектора
-- Автоматический выбор сети: WiFi, AP, eth...
 - Отображение локального IP и QR-кода `http://IP:8080`
+- Обновление IP и QR жестом протяжки вниз
 - Двуязычный UI (RU/EN)
 - Минимальные требования к слушателям — только браузер
 
