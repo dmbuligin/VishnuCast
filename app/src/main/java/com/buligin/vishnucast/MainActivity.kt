@@ -207,7 +207,12 @@ class MainActivity : AppCompatActivity() {
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
         updateUiRunning(CastService.isRunning)
         netMon = NetworkMonitor(this) { newIp ->
-            runOnUiThread { applyIpToUi(newIp) }
+            runOnUiThread {
+                // ВАЖНО: при смене интерфейса/адреса пересоздаём WebRTC ядро,
+                // иначе после перехода в хотспот возможна "немота".
+                try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
+                applyIpToUi(newIp)
+            }
         }.also { it.start() }
 
     }

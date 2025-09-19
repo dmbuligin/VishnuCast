@@ -20,6 +20,7 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 
 class CastService : Service() {
+    private var netMon: NetworkMonitor? = null
     private var server: VishnuServer? = null
     private var boundPort: Int = 8080
 
@@ -29,6 +30,11 @@ class CastService : Service() {
         // Переводим сервис в foreground со «стикерным» уведомлением
         createNotificationChannelIfNeeded()
         startForeground(NOTIF_ID, buildRunningNotification())
+
+        netMon = NetworkMonitor(this) {
+            try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
+        }.also { it.start() }
+
 
         // Выбираем доступный порт, начиная с 8080
         val port = pickAvailablePort(8080, maxTries = 50)
@@ -85,6 +91,8 @@ class CastService : Service() {
             @Suppress("DEPRECATION")
             stopForeground(true)
         }
+        netMon?.stop()
+        netMon = null
         super.onDestroy()
     }
 
