@@ -17,18 +17,13 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // Единственная инициализация libwebrtc во всём процессе:
+        // Единственная инициализация WebRTC — БЕЗ fieldTrials (как в рабочей версии)
         try {
-            val initOpts = PeerConnectionFactory
-                .InitializationOptions
-                .builder(applicationContext)
-                .setFieldTrials("WebRTC-MDNS/Disabled/") // важно для хотспота: host-кандидаты вместо mDNS
+            val initOptions = PeerConnectionFactory.InitializationOptions.builder(this)
                 .setEnableInternalTracer(false)
                 .createInitializationOptions()
-            PeerConnectionFactory.initialize(initOpts)
-        } catch (_: Throwable) {
-            // Повторная инициализация просто игнорируется libwebrtc
-        }
+            PeerConnectionFactory.initialize(initOptions)
+        } catch (_: Throwable) {}
 
         // 1) Выбор языка приложения
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -43,6 +38,7 @@ class App : Application() {
 
         applyAppLanguage(langToApply)
     }
+
 
     private fun systemPrimaryLang(): String {
         val locales: LocaleList = resources.configuration.locales

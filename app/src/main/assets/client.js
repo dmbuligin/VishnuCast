@@ -213,6 +213,18 @@
   // ---------- Start / Stop ----------
   function start() {
     if (state === 'connecting' || state === 'connected') return;
+
+// Разблокируем аудио-д движок в рамках жеста пользователя
+  try {
+    if (window.AudioContext || window.webkitAudioContext) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!window.__vc_ac) window.__vc_ac = new AC();
+      if (window.__vc_ac.state === 'suspended') {
+        window.__vc_ac.resume().catch(()=>{});
+      }
+    }
+  } catch(_) {}
+
     userStopped = false;
     stopping = false;
     state = 'connecting';
@@ -382,28 +394,49 @@
       }
     };
 
-    pc.ontrack = function(ev){
-      log('[VC] ontrack', ev && ev.streams && ev.streams[0]);
-      try {
-        if (ev.streams && ev.streams[0]) {
-          audioEl.srcObject = ev.streams[0];
-          audioEl.play().catch(function(e){ log('[VC] audio play failed', e); });
-        } else if (ev.track) {
-          var ms = new MediaStream([ev.track]);
-          audioEl.srcObject = ms;
-          audioEl.play().catch(function(e){ log('[VC] audio play failed', e); });
-        } else {
-          setStatus(texts.t('no_audio'));
-        }
-      } catch (e) {
-        log('[VC] attach audio error', e);
-        setStatus(texts.t('no_audio'));
-      }
-      state = 'connected';
-      setBtn();
-      setStatus();
-      cancelReofferTimer();
-    };
+   pc.ontrack = function(ev){
+     log('[VC] ontrack', ev && ev.streams && ev.streams[0]);
+     try {
+       var stream = (ev.streams && ev.streams[0])
+         ? ev.streams[0]
+         : (ev.track ? new MediaStream([ev.track]) : null);
+       if (stream) {
+         // подстрахуем атрибуты и громкость
+         audioEl.setAttribute('playsinline', '');
+         audioEl.setAttribute('autoplay', '');
+         audioEl.muted = false;
+         audioEl.volume = 1.0;
+         audioEl.srcObject = stream;
+
+         // несколько попыток воспроизвести
+         let tries = 0;
+         (function kick(){
+           audioEl.play().then(function(){
+             log('[VC] audio playing');
+           }).catch(function(e){
+             tries++;
+             if (tries < 3) {
+               log('[VC] audio play retry', tries, e && e.name);
+               setTimeout(kick, 300);
+             } else {
+               log('[VC] audio play failed', e);
+             }
+           });
+         })();
+       } else {
+         setStatus(texts.t('no_audio'));
+       }
+     } catch (e) {
+       log('[VC] attach audio error', e);
+       setStatus(texts.t('no_audio'));
+     }
+
+     state = 'connected';
+     setBtn();
+     setStatus();
+     cancelReofferTimer();
+   };
+
 
     // Immediately send an OFFER (browser as offerer) — most common flow
     sendOffer();
