@@ -206,14 +206,14 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
         updateUiRunning(CastService.isRunning)
-        netMon = NetworkMonitor(this) { newIp ->
-            runOnUiThread {
-                // ВАЖНО: при смене интерфейса/адреса пересоздаём WebRTC ядро,
-                // иначе после перехода в хотспот возможна "немота".
-               // try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
-                applyIpToUi(newIp)
-            }
-        }.also { it.start() }
+//        netMon = NetworkMonitor(this) { newIp ->
+//            runOnUiThread {
+//                // ВАЖНО: при смене интерфейса/адреса пересоздаём WebRTC ядро,
+//                // иначе после перехода в хотспот возможна "немота".
+//               // try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
+//                applyIpToUi(newIp)
+//            }
+//        }.also { it.start() }
 
     }
 
@@ -222,8 +222,9 @@ class MainActivity : AppCompatActivity() {
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         arrowHint.stopHint()
         hideArrowHint()
-        netMon?.stop()
-        netMon = null
+
+//        netMon?.stop()
+//        netMon = null
 
     }
 
@@ -248,6 +249,11 @@ class MainActivity : AppCompatActivity() {
         }
         R.id.action_about -> {
             startActivity(Intent(this, AboutActivity::class.java))
+            true
+        }
+
+        R.id.action_refresh -> {
+            refreshNetworkUi()
             true
         }
         else -> super.onOptionsItemSelected(item)
@@ -349,6 +355,13 @@ class MainActivity : AppCompatActivity() {
         return if (sys != null && sys.language.lowercase(Locale.ROOT).startsWith("ru")) "ru" else "en"
     }
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun refreshNetworkUi() {
+        applyIpToUi(getLocalIpAddress())
+        // необязательная подсказка пользователю:
+        // Toast.makeText(this, getString(R.string.cast_action_refresh), Toast.LENGTH_SHORT).show()
+    }
+
     private fun applyIpToUi(ip: String?) {
         val port = getServerPort()
         val url = if (ip != null) "http://$ip:$port" else getString(R.string.placeholder_url)

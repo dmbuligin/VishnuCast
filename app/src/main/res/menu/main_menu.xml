@@ -3,6 +3,11 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
+            android:id="@+id/action_refresh"
+            android:title="@string/cast_action_refresh"
+            android:showAsAction="never" />
+
+    <item
         android:id="@+id/menu_settings"
         android:title="@string/menu_settings"
         app:showAsAction="never" />
