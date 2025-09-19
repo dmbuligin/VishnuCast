@@ -48,7 +48,8 @@ import android.net.wifi.WifiManager
 import android.net.Uri
 import androidx.work.WorkManager
 import android.widget.Button
-
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import android.view.HapticFeedbackConstants
 
 
 
@@ -130,6 +131,19 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        findViewById<SwipeRefreshLayout?>(R.id.swipeRefresh)?.let { srl ->
+            srl.setOnRefreshListener {
+                // лёгкая вибра (необязательно)
+                try { srl.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) } catch (_: Throwable) {}
+
+                refreshNetworkUi()      // твой метод обновления IP/URL
+                srl.isRefreshing = false
+            }
+        }
+
+
+
         tvNetBadge = findViewById(R.id.tvNetBadge)
 
         val toolbar: androidx.appcompat.widget.Toolbar = findViewById(R.id.toolbar)
