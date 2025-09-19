@@ -210,7 +210,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 // ВАЖНО: при смене интерфейса/адреса пересоздаём WebRTC ядро,
                 // иначе после перехода в хотспот возможна "немота".
-                try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
+               // try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
                 applyIpToUi(newIp)
             }
         }.also { it.start() }

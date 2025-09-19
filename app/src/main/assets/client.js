@@ -272,6 +272,7 @@
 
   function handleSignal(raw){
     try {
+      try { log('[VC] sig in:', raw); } catch(_) {}
       var msg = raw;
       if (typeof raw === 'string') {
         // Try JSON first
@@ -356,10 +357,16 @@
     };
     pc = new RTCPeerConnection(conf);
 
+    // >>> Добавлены диагностические логи ICE <<<
+    pc.addEventListener('iceconnectionstatechange', ()=>console.log('[VC] ice:', pc.iceConnectionState));
+    pc.addEventListener('icegatheringstatechange', ()=>console.log('[VC] iceGather:', pc.iceGatheringState));
+    // <<< конец вставки >>>
+
     try { pc.addTransceiver('audio', { direction: 'recvonly' }); } catch(_){}
 
     pc.onicecandidate = function(ev){
       if (ev.candidate && ws && ws.readyState === 1) {
+        log('[VC] local ICE cand:', ev.candidate.candidate);
         // send flat candidate; server may also accept nested — but flat is broadly compatible
         ws.send(JSON.stringify({
           candidate: ev.candidate.candidate,

@@ -32,7 +32,7 @@ class CastService : Service() {
         startForeground(NOTIF_ID, buildRunningNotification())
 
         netMon = NetworkMonitor(this) {
-            try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
+            //try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
         }.also { it.start() }
 
 

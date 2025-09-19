@@ -38,15 +38,10 @@ class WebRtcCore(private val ctx: Context) {
     }
 
     init {
+        // ВАЖНО: PeerConnectionFactory.initialize(...) уже вызван в App.onCreate() с fieldTrials WebRTC-MDNS/Disabled/
         val encoder = DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true)
         val decoder = DefaultVideoDecoderFactory(eglBase.eglBaseContext)
 
-        PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(ctx).createInitializationOptions()
-        )
-
-        // ADM: используем VOICE_RECOGNITION вместо VOICE_COMMUNICATION,
-        // и отключаем хардварные AEC/NS — дальше включим софт через constraints.
         adm = JavaAudioDeviceModule.builder(ctx)
             .setUseHardwareAcousticEchoCanceler(false)
             .setUseHardwareNoiseSuppressor(false)
@@ -98,7 +93,7 @@ class WebRtcCore(private val ctx: Context) {
             .setVideoDecoderFactory(decoder)
             .createPeerConnectionFactory()
 
-        // Медиаконтрейнты: включаем софт-AEC/NS/AGC через goog* ключи
+        // Медиаконтрейнты: софт-AEC/NS/AGC через goog* ключи
         val prefs = ctx.getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         val agcEnabled = prefs.getBoolean(KEY_AGC_ENABLED, true)
         val audioConstraints = MediaConstraints().apply {
@@ -120,6 +115,9 @@ class WebRtcCore(private val ctx: Context) {
         ).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+            iceTransportsType = PeerConnection.IceTransportsType.ALL
+            tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.ENABLED
+            // disableLinkLocalNetworks отсутствует в вашей версии org.webrtc → не используем.
         }
 
         val pcConnected = AtomicBoolean(false)

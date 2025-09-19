@@ -17,9 +17,20 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // 1) Выбор языка приложения:
-        //    - если сохранён в prefs → используем его;
-        //    - иначе смотрим язык системы: ru → "ru", иначе → "en"; сохраняем.
+        // Единственная инициализация libwebrtc во всём процессе:
+        try {
+            val initOpts = PeerConnectionFactory
+                .InitializationOptions
+                .builder(applicationContext)
+                .setFieldTrials("WebRTC-MDNS/Disabled/") // важно для хотспота: host-кандидаты вместо mDNS
+                .setEnableInternalTracer(false)
+                .createInitializationOptions()
+            PeerConnectionFactory.initialize(initOpts)
+        } catch (_: Throwable) {
+            // Повторная инициализация просто игнорируется libwebrtc
+        }
+
+        // 1) Выбор языка приложения
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         val saved = prefs.getString(KEY_APP_LANG, null)
 
@@ -31,17 +42,9 @@ class App : Application() {
         }
 
         applyAppLanguage(langToApply)
-
-        // 2) MUST: инициализируем нативные библиотеки WebRTC до первого JNI вызова
-        val init = PeerConnectionFactory.InitializationOptions
-            .builder(this)
-            .setEnableInternalTracer(false)
-            .createInitializationOptions()
-        PeerConnectionFactory.initialize(init)
     }
 
     private fun systemPrimaryLang(): String {
-        // Android 7+ может иметь список локалей — берём первую.
         val locales: LocaleList = resources.configuration.locales
         val primary: Locale = if (locales.size() > 0) locales[0] else Locale.getDefault()
         return primary.language.lowercase(Locale.ROOT)
