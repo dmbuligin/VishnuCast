@@ -375,7 +375,9 @@
       }
     // keep-alive ответ сервера
     if (msg && typeof msg === 'object' && msg.type === 'pong') {
-      log('WS keep-alive ← pong', (msg.t ? ('dt=' + (Date.now() - msg.t) + 'ms') : ''));
+      var rtt = (typeof msg.t === 'number') ? (Date.now() - msg.t) : null;
+      if (rtt != null && rtt < 0) rtt = Math.abs(rtt); // на всякий случай
+      log('WS keep-alive ← pong', (rtt != null ? ('RTT≈' + rtt + 'ms') : ''), (msg.ts ? ('srvTs=' + msg.ts) : ''));
       return;
     }
       log('Signal: unrecognized payload');

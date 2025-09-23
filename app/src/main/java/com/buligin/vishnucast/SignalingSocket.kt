@@ -68,7 +68,8 @@ class SignalingSocket(
                     try {
                         val pong = JSONObject()
                             .put("type", "pong")
-                            .put("t", System.currentTimeMillis())
+                            .put("t", obj.optLong("t", 0L))            // ЭХО клиентского времени
+                            .put("ts", System.currentTimeMillis())     // (опционально) серверное время
                         send(pong.toString())
                     } catch (_: Throwable) {}
                     return
