@@ -126,6 +126,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+// Гарантированно поднимаем сервисы при открытии окна (и после «Выход» тоже)
+        CastService.ensureStarted(applicationContext)
 
         findViewById<SwipeRefreshLayout?>(R.id.swipeRefresh)?.let { srl ->
             srl.setOnRefreshListener {

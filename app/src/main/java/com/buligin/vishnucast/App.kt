@@ -16,7 +16,8 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
-
+// Холодный старт: сразу поднимаем сервис (он сам поймёт, что уже запущен)
+        CastService.ensureStarted(applicationContext)
         // Единственная инициализация WebRTC — БЕЗ fieldTrials (как в рабочей версии)
         try {
             val initOptions = PeerConnectionFactory.InitializationOptions.builder(this)
