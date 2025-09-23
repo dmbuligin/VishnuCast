@@ -8,11 +8,9 @@ import java.util.Timer
 import java.util.TimerTask
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 class WebRtcCore(private val ctx: Context) {
     private val egl = EglBase.create()
@@ -27,9 +25,9 @@ class WebRtcCore(private val ctx: Context) {
     // Индикатор уровня через getStats()
     @Volatile private var statsPc: PeerConnection? = null
     private var statsTimer: Timer? = null
-    @Volatile private var lastEnergy: Double? = null          // totalAudioEnergy (сек-Вт, условно)
-    @Volatile private var lastDuration: Double? = null        // totalSamplesDuration (сек)
-    @Volatile private var shownLevel01: Double = 0.0          // текущее «показанное» значение 0..1 (для release)
+    @Volatile private var lastEnergy: Double? = null          // totalAudioEnergy
+    @Volatile private var lastDuration: Double? = null        // totalSamplesDuration
+    @Volatile private var shownLevel01: Double = 0.0          // показанное значение 0..1 (для release)
 
     init {
         // ADM: VOICE_RECOGNITION, HW AEC/NS off — «золотой» профиль
@@ -78,6 +76,9 @@ class WebRtcCore(private val ctx: Context) {
         if (mutedNow) {
             shownLevel01 = 0.0
             SignalLevel.post(0)
+            // сбрасываем базу дельт
+            lastEnergy = null
+            lastDuration = null
         }
     }
 
@@ -133,7 +134,7 @@ class WebRtcCore(private val ctx: Context) {
 
         // Для индикатора уровня будем читать статистику с «последнего» PC
         statsPc = pc
-        ensureStatsTimer()
+        restartStatsTimer() // гарантированно перезапустим с актуальным tick
 
         return pc
     }
@@ -183,10 +184,31 @@ class WebRtcCore(private val ctx: Context) {
         }, MediaConstraints())
     }
 
-    /** Таймер опроса статистики PC → «живой» уровень 0..100. */
+    /** Внешний тюнинг «скорости затухания» уровня (0.05..3.0 долей шкалы в секунду). */
+    fun setLevelReleasePerSec(value: Double) {
+        LEVEL_RELEASE_PER_SEC = value.coerceIn(0.05, 3.0)
+    }
+
+    /** Внешний тюнинг периода опроса. Перезапустит таймер. */
+    fun setLevelTickMs(ms: Int) {
+        LEVEL_TICK_MS = ms.coerceIn(60, 500)
+        restartStatsTimer()
+    }
+
+    // ------------------- ВНУТРЕННЕЕ: таймер и расчёт уровня -------------------
+
+    @Synchronized
+    private fun restartStatsTimer() {
+        try { statsTimer?.cancel() } catch (_: Throwable) {}
+        statsTimer = null
+        if (statsPc == null) return
+        ensureStatsTimer()
+    }
+
     @Synchronized
     private fun ensureStatsTimer() {
         if (statsTimer != null) return
+        val tick = LEVEL_TICK_MS.toLong()
         statsTimer = Timer("vc-stats", true).apply {
             schedule(object : TimerTask() {
                 override fun run() {
@@ -194,7 +216,7 @@ class WebRtcCore(private val ctx: Context) {
                     if (muted.get()) {
                         shownLevel01 = 0.0
                         SignalLevel.post(0)
-                        // Сбрасываем базу для дельт, чтобы после unmute не было скачка
+                        // сбрасываем базу для дельт
                         lastEnergy = null
                         lastDuration = null
                         return
@@ -235,7 +257,7 @@ class WebRtcCore(private val ctx: Context) {
                                 }
                                 instLevel01 = lv
                             } else {
-                                // Дельта-метод: берем приращения totalAudioEnergy/totalSamplesDuration
+                                // Дельта-метод
                                 val prevE = lastEnergy
                                 val prevD = lastDuration
                                 lastEnergy = energy
@@ -243,29 +265,24 @@ class WebRtcCore(private val ctx: Context) {
 
                                 if (prevE != null && prevD != null) {
                                     val dE = max(0.0, energy!! - prevE)
-                                    val dD = max(1e-9, dur!! - prevD) // защита от деления на 0
-                                    // dE/dD ≈ средняя мощность в окне (0..1) — грубая оценка
+                                    val dD = max(1e-9, dur!! - prevD)
                                     var p = dE / dD
-                                    // Нормируем и ограничиваем (иногда бывают всплески >1 из-за дискретности счетчиков)
                                     p = min(1.0, max(0.0, p))
                                     instLevel01 = p
                                 } else {
-                                    // Первое измерение: ничего не знаем — не дергаем индикатор
                                     instLevel01 = null
                                 }
                             }
 
-                            // Преобразуем в «живой» уровень с атакой/релизом
                             val target = (instLevel01 ?: 0.0).coerceIn(0.0, 1.0)
 
-                            // Attack: быстро подхватываем всплески (берём максимум сразу)
+                            // Attack: мгновенно берём всплеск
                             if (target > shownLevel01) {
                                 shownLevel01 = target
                             } else {
-                                // Release: плавно отпускаем — ~40 уровней/сек при шаге 120мс
-                                val decayPerTick = 0.04
+                                // Release: регулируемый спад
+                                val decayPerTick = LEVEL_RELEASE_PER_SEC * (LEVEL_TICK_MS / 1000.0)
                                 shownLevel01 = max(0.0, shownLevel01 - decayPerTick)
-                                // но не опускаем ниже реального target
                                 if (shownLevel01 < target) shownLevel01 = target
                             }
 
@@ -273,10 +290,10 @@ class WebRtcCore(private val ctx: Context) {
                             SignalLevel.post(percent)
                         }
                     } catch (_: Throwable) {
-                        // При ошибке статистики просто пропускаем тик
+                        // пропускаем тик
                     }
                 }
-            }, 0L, 120L) // ~120 мс: заметно живее 500 мс
+            }, 0L, tick)
         }
     }
 
@@ -294,5 +311,20 @@ class WebRtcCore(private val ctx: Context) {
         lastDuration = null
         shownLevel01 = 0.0
         SignalLevel.post(0)
+    }
+
+    companion object {
+        /**
+         * Период опроса статистики (мс). Меньше — живее, но чаще вызовы getStats().
+         * Рекомендованный диапазон: 60..200.
+         */
+        @Volatile var LEVEL_TICK_MS: Int = 120
+
+        /**
+         * Скорость затухания («release») в долях шкалы за секунду.
+         * 0.33 = ~33%/сек (мягко), 0.6 = бодро, 1.0 = быстрое падение.
+         * Допустимый диапазон: 0.05..3.0
+         */
+        @Volatile var LEVEL_RELEASE_PER_SEC: Double = 1.50
     }
 }
