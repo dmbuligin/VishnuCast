@@ -97,27 +97,21 @@ class WebRtcCore(private val ctx: Context) {
     /** Включить/выключить микрофон (mute) без разрушения трека. */
     fun setMuted(mutedNow: Boolean) {
         muted.set(mutedNow)
-        try { adm.setMicrophoneMute(mutedNow) } catch (_: Throwable) {}
-        try { audioTrack.setEnabled(true) } catch (_: Throwable) {}
         if (mutedNow) {
+            // Всегда освобождаем микрофон и гасим индикатор/зонд
+            try { adm.setMicrophoneMute(true) } catch (_: Throwable) {}
+            probe.stop()
             shownLevel01 = 0.0
             SignalLevel.post(0)
             lastEnergy = null
             lastDuration = null
-            // при mute — стоп зонда в любом случае
-            probe.stop()
-            d("setMuted: ON → level=0, probe stop")
+            d("setMuted: ON → ADM muted, probe stop, level=0")
         } else {
             d("setMuted: OFF")
-            // Если нет клиентов — запускаем зонд
-            if (connectedPeerCount.get() == 0) {
-                probe.setRelease(LEVEL_RELEASE_PER_SEC)
-                probe.setTickMs(LEVEL_TICK_MS)
-                probe.start { level01 -> onExternalLevel(level01) }
-                d("setMuted: probe start (no clients)")
-            }
+            updateCaptureRouting()
         }
     }
+
 
     /** Реакция на уровень от внешнего зонда (0..1). */
     private fun onExternalLevel(level01: Double) {
@@ -153,35 +147,32 @@ class WebRtcCore(private val ctx: Context) {
                     PeerConnection.IceConnectionState.CONNECTED -> {
                         val n = connectedPeerCount.incrementAndGet()
                         ClientCount.post(n)
-                        // Клиент есть → выключаем зонд, переходим на stats
-                        probe.stop()
+                        // Включаем сбор статов с реального PC
                         statsPc = createdPc
                         lastEnergy = null; lastDuration = null
                         restartStatsTimer()
-                        d("PC CONNECTED: clients=$n, probe stop, statsPc=real")
+                        // И перенастраиваем «кто держит микрофон»
+                        updateCaptureRouting()
+                        d("PC CONNECTED: clients=$n → statsPc=real, routing updated")
                     }
                     PeerConnection.IceConnectionState.CLOSED,
                     PeerConnection.IceConnectionState.FAILED,
                     PeerConnection.IceConnectionState.DISCONNECTED -> {
                         val n = connectedPeerCount.decrementAndGet().coerceAtLeast(0)
                         ClientCount.post(n)
+                        // Если клиентов не осталось — выключаем stats, вернёмся на зонд/ADM
                         if (n == 0) {
-                            // Клиентов нет → отключаем stats и включаем зонд (если не mute)
                             try { statsTimer?.cancel() } catch (_: Throwable) {}
                             statsTimer = null
                             statsPc = null
-                            lastEnergy = null; lastDuration = null
-                            if (!muted.get()) {
-                                probe.setRelease(LEVEL_RELEASE_PER_SEC)
-                                probe.setTickMs(LEVEL_TICK_MS)
-                                probe.start { level01 -> onExternalLevel(level01) }
-                                d("PC DISCONNECT: no clients, probe start")
-                            }
                         }
+                        updateCaptureRouting()
+                        d("PC ${state}: clients=$n → stats ${if (n==0) "stopped" else "kept"}, routing updated")
                     }
                     else -> { /* no-op */ }
                 }
             }
+
 
             override fun onStandardizedIceConnectionChange(newState: PeerConnection.IceConnectionState?) {}
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {}
@@ -204,11 +195,9 @@ class WebRtcCore(private val ctx: Context) {
         val sender = pc.addTrack(audioTrack, listOf("vishnu_audio_stream"))
         d("createPeerConnection: addTrack sender=${sender != null}")
 
-        // Переходим на stats; зонд на всякий случай стопаем
-        probe.stop()
-        statsPc = pc
-        restartStatsTimer()
-        d("createPeerConnection: statsPc switched to newly created PC, probe stop")
+        // До CONNECTED ничего не меняем: зонд/ADM переключим в onIceConnectionChange
+        d("createPeerConnection: created; waiting for CONNECTED to switch routing/stats")
+
 
         return pc
     }
@@ -282,6 +271,32 @@ class WebRtcCore(private val ctx: Context) {
         if (statsPc == null) { d("restartStatsTimer: statsPc is null"); return }
         ensureStatsTimer()
     }
+
+    /** Включает/выключает ADM и зонд так, чтобы микрофон был ровно у одного владельца. */
+    private fun updateCaptureRouting() {
+        if (muted.get()) {
+            // На всякий случай — зона «тишины»
+            try { adm.setMicrophoneMute(true) } catch (_: Throwable) {}
+            probe.stop()
+            return
+        }
+        val clients = connectedPeerCount.get()
+        if (clients > 0) {
+            // Есть клиент → WebRTC должен захватывать, зонд не нужен
+            probe.stop()
+            try { adm.setMicrophoneMute(false) } catch (_: Throwable) {}
+            d("route: UNMUTED + clients=$clients → ADM UNMUTE, probe STOP")
+        } else {
+            // Клиентов нет → индикатор ведёт зонд, ADM не трогаем микрофон
+            try { adm.setMicrophoneMute(true) } catch (_: Throwable) {} // оставить микрофон свободным
+            probe.setRelease(LEVEL_RELEASE_PER_SEC)
+            probe.setTickMs(LEVEL_TICK_MS)
+            probe.start { level01 -> onExternalLevel(level01) }
+            d("route: UNMUTED + no clients → ADM MUTE, probe START")
+        }
+    }
+
+
 
     @Synchronized
     private fun ensureStatsTimer() {
