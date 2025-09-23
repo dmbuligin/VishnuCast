@@ -2,25 +2,13 @@ package com.buligin.vishnucast
 
 import android.content.Context
 import android.media.MediaRecorder
-import org.webrtc.AudioSource
-import org.webrtc.AudioTrack
-import org.webrtc.DataChannel
-import org.webrtc.DefaultVideoDecoderFactory
-import org.webrtc.DefaultVideoEncoderFactory
-import org.webrtc.EglBase
-import org.webrtc.IceCandidate
-import org.webrtc.MediaConstraints
-import org.webrtc.MediaStream
-import org.webrtc.PeerConnection
-import org.webrtc.PeerConnectionFactory
-import org.webrtc.RtpTransceiver
-import org.webrtc.SdpObserver
-import org.webrtc.SessionDescription
+import org.webrtc.*
 import org.webrtc.audio.JavaAudioDeviceModule
 import java.util.concurrent.atomic.AtomicInteger
 
 class WebRtcCore(private val ctx: Context) {
     private val egl = EglBase.create()
+    private val adm: JavaAudioDeviceModule
     private val factory: PeerConnectionFactory
     private val audioSource: AudioSource
     private val audioTrack: AudioTrack
@@ -28,8 +16,8 @@ class WebRtcCore(private val ctx: Context) {
     private val connectedPeerCount = AtomicInteger(0)
 
     init {
-        // 1) ADM: VOICE_RECOGNITION + ОТКЛЮЧАЕМ аппаратные AEC/NS
-        val adm = JavaAudioDeviceModule.builder(ctx)
+        // ADM: VOICE_RECOGNITION, HW AEC/NS off — «золотой» профиль
+        adm = JavaAudioDeviceModule.builder(ctx)
             .setUseHardwareAcousticEchoCanceler(false)
             .setUseHardwareNoiseSuppressor(false)
             .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
@@ -38,10 +26,7 @@ class WebRtcCore(private val ctx: Context) {
         val encoderFactory = DefaultVideoEncoderFactory(egl.eglBaseContext, true, true)
         val decoderFactory = DefaultVideoDecoderFactory(egl.eglBaseContext)
 
-        // 2) Как в «золотой» версии: отключён NetworkMonitor — не трогаем
-        val options = PeerConnectionFactory.Options().apply {
-            disableNetworkMonitor = true
-        }
+        val options = PeerConnectionFactory.Options().apply { disableNetworkMonitor = true }
 
         factory = PeerConnectionFactory.builder()
             .setOptions(options)
@@ -50,21 +35,30 @@ class WebRtcCore(private val ctx: Context) {
             .setVideoDecoderFactory(decoderFactory)
             .createPeerConnectionFactory()
 
-        // 3) Мягкие аудио-констрейнты (софт AEC/NS/AGC через goog*)
+        // Софт-флаги (AEC/NS/AGC(+2))
         val audioConstraints = MediaConstraints().apply {
-            mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
-            mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl2", "true"))
-            // небольшой фильтр НЧ поможет на ряде девайсов
+            optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl2", "true"))
             optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
         }
 
         audioSource = factory.createAudioSource(audioConstraints)
         audioTrack  = factory.createAudioTrack("ARDAMSa0", audioSource)
         audioTrack.setEnabled(true)
+
+        // Стартуем в mute → «пустой поток»
+        adm.setMicrophoneMute(true)
     }
 
+    /** Включить/выключить микрофон (mute) без разрушения трека. */
+    fun setMuted(muted: Boolean) {
+        try { adm.setMicrophoneMute(muted) } catch (_: Throwable) {}
+        try { audioTrack.setEnabled(true) } catch (_: Throwable) {} // трек всегда есть
+    }
+
+    /** Создать PeerConnection с нашей конфигурацией. */
     fun createPeerConnection(onIce: (IceCandidate) -> Unit): PeerConnection? {
         val rtcConfig = PeerConnection.RTCConfiguration(
             listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
@@ -74,56 +68,80 @@ class WebRtcCore(private val ctx: Context) {
         }
 
         val observer = object : PeerConnection.Observer {
-            override fun onIceCandidate(c: IceCandidate) { onIce(c) }
-            override fun onIceCandidatesRemoved(c: Array<out IceCandidate>?) {}
-            override fun onSignalingChange(s: PeerConnection.SignalingState?) {}
-            override fun onIceConnectionReceivingChange(b: Boolean) {}
-            override fun onIceGatheringChange(s: PeerConnection.IceGatheringState?) {}
-            override fun onConnectionChange(s: PeerConnection.PeerConnectionState?) {}
-            override fun onAddStream(stream: MediaStream?) {}
-            override fun onRemoveStream(stream: MediaStream?) {}
-            override fun onTrack(t: RtpTransceiver?) {}
-            override fun onDataChannel(dc: DataChannel?) {}
-            override fun onRenegotiationNeeded() {}
+            override fun onIceCandidate(candidate: IceCandidate) { onIce(candidate) }
+            override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) { /* no-op */ }
 
-            override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState?) {
-                when (newState) {
+            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                when (state) {
                     PeerConnection.IceConnectionState.CONNECTED -> {
                         val n = connectedPeerCount.incrementAndGet()
                         ClientCount.post(n)
                     }
-                    PeerConnection.IceConnectionState.DISCONNECTED,
+                    PeerConnection.IceConnectionState.CLOSED,
                     PeerConnection.IceConnectionState.FAILED,
-                    PeerConnection.IceConnectionState.CLOSED -> {
+                    PeerConnection.IceConnectionState.DISCONNECTED -> {
                         val n = connectedPeerCount.decrementAndGet().coerceAtLeast(0)
                         ClientCount.post(n)
                     }
                     else -> {}
                 }
             }
+
+            override fun onStandardizedIceConnectionChange(newState: PeerConnection.IceConnectionState?) { /* no-op */ }
+            override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) { /* no-op */ }
+            override fun onSelectedCandidatePairChanged(event: CandidatePairChangeEvent?) { /* no-op */ }
+
+            override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
+            override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+            override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {}
+            override fun onAddStream(stream: MediaStream?) {}
+            override fun onRemoveStream(stream: MediaStream?) {}
+            override fun onDataChannel(dc: DataChannel?) {}
+            override fun onRenegotiationNeeded() {}
+            override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {}
+            override fun onTrack(transceiver: RtpTransceiver?) {}
+            override fun onRemoveTrack(receiver: RtpReceiver?) { /* no-op */ }
         }
 
         val pc = factory.createPeerConnection(rtcConfig, observer) ?: return null
 
-        // Добавляем аудио-трек в именованный поток (как у тебя и было)
+        // Добавляем аудио-трек (sendonly) — стабильный stream id
         pc.addTrack(audioTrack, listOf("vishnu_audio_stream"))
-
-        // «Пинок» записи у некоторых прошивок (безопасно):
-        try { pc.getStats { /* no-op */ } } catch (_: Throwable) {}
-
         return pc
     }
 
-    // Эти врапперы нужны PeerManager'у
+    /**
+     * Перегрузка под текущий PeerManager: применяем удалённый SDP и дергаем onSet() при успехе.
+     */
     fun setRemoteDescription(pc: PeerConnection, sdp: SessionDescription, onSet: () -> Unit = {}) {
         pc.setRemoteDescription(object : SdpObserver {
-            override fun onSetSuccess() = onSet()
+            override fun onSetSuccess() { onSet() }
             override fun onSetFailure(p0: String?) {}
             override fun onCreateSuccess(p0: SessionDescription?) {}
             override fun onCreateFailure(p0: String?) {}
         }, sdp)
     }
 
+    /**
+     * Вариант «получили offer (sdp:String) → сразу setRemote + создать answer».
+     * Оставляю для совместимости, если где-то используется.
+     */
+    fun setRemoteSdp(pc: PeerConnection, sdp: String, onLocalSdp: (SessionDescription) -> Unit) {
+        val remote = SessionDescription(SessionDescription.Type.OFFER, sdp)
+        pc.setRemoteDescription(object : SdpObserver {
+            override fun onSetSuccess() { createAnswer(pc, onLocalSdp) }
+            override fun onSetFailure(p0: String?) {}
+            override fun onCreateSuccess(p0: SessionDescription?) {}
+            override fun onCreateFailure(p0: String?) {}
+        }, remote)
+    }
+
+    /** Добавить входящий ICE-кандидат. */
+    fun addIceCandidate(pc: PeerConnection, c: IceCandidate) {
+        try { pc.addIceCandidate(c) } catch (_: Throwable) {}
+    }
+
+    /** Сформировать локальный answer и вернуть его через callback. */
     fun createAnswer(pc: PeerConnection, onLocalSdp: (SessionDescription) -> Unit) {
         pc.createAnswer(object : SdpObserver {
             override fun onCreateSuccess(desc: SessionDescription?) {
@@ -142,6 +160,7 @@ class WebRtcCore(private val ctx: Context) {
         }, MediaConstraints())
     }
 
+    /** Полная очистка Core. */
     fun close() {
         try { audioTrack.setEnabled(false) } catch (_: Throwable) {}
         try { audioTrack.dispose() } catch (_: Throwable) {}
@@ -149,5 +168,4 @@ class WebRtcCore(private val ctx: Context) {
         try { factory.dispose() } catch (_: Throwable) {}
         try { egl.release() } catch (_: Throwable) {}
     }
-
 }

@@ -37,6 +37,9 @@ class App : Application() {
         }
 
         applyAppLanguage(langToApply)
+
+        // Автостарт сервера/сигналинга
+        CastService.ensureStarted(this)
     }
 
 

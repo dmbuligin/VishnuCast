@@ -1,220 +1,148 @@
 package com.buligin.vishnucast
 
-import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
-import android.annotation.SuppressLint
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.app.Service
+import android.app.*
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
-import android.media.AudioDeviceInfo
-import android.media.AudioManager
-import java.io.IOException
-import java.net.InetSocketAddress
-import java.net.ServerSocket
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 
 class CastService : Service() {
-    private var netMon: NetworkMonitor? = null
+
     private var server: VishnuServer? = null
-    private var boundPort: Int = 8080
 
     override fun onCreate() {
         super.onCreate()
-
-        // Переводим сервис в foreground со «стикерным» уведомлением
         createNotificationChannelIfNeeded()
         startForeground(NOTIF_ID, buildRunningNotification())
 
-        netMon = NetworkMonitor(this) {
-            //try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
-        }.also { it.start() }
+        // 1) Поднять HTTP/WS сервер немедленно
+        startHttpWsIfNeeded()
 
+        // 2) Гарантировать инициализацию WebRTC core и включить "тишину"
+        val core = WebRtcCoreHolder.get(applicationContext)
+        try { core.setMuted(true) } catch (_: Throwable) {}
 
-        // Выбираем доступный порт, начиная с 8080
-        val port = pickAvailablePort(8080, maxTries = 50)
-            ?: run {
-                Logger.e("CastService", "No free port in 8080..8129")
-                safeNotify(NOTIF_ID, buildErrorNotification("No free port (8080..8129)"))
-                stopSelf()
-                return
-            }
-
-        try {
-            boundPort = port
-            // Сохраним выбранный порт для UI (MainActivity прочитает из prefs)
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                .putInt(KEY_PORT, boundPort).apply()
-
-            // Стартуем VishnuServer (WS + HTTP) на выбранном порту
-            server = VishnuServer(applicationContext, boundPort)
-            server?.launch(300_000, /*daemon=*/false)
-            Logger.i("CastService", "VishnuServer started on :$boundPort")
-        } catch (e: Throwable) {
-            Logger.e("CastService", "Failed to start server on :$boundPort", e)
-            safeNotify(NOTIF_ID, buildErrorNotification("Server error: ${e.message ?: "unknown"}"))
-            stopSelf()
-            return
-        }
-
-        // Локальная индикация уровня
-        MicLevelProbe.start(applicationContext)
+        isRunning = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Фикс состояния при пересоздании Activity (поворот экрана и т.п.)
-        isRunning = true
-        return START_STICKY
+        when (intent?.action) {
+            ACTION_START -> {
+                // уже поднято в onCreate; оставляем для явного старта
+                startHttpWsIfNeeded()
+            }
+            ACTION_STOP -> {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_MUTE -> {
+                try { WebRtcCoreHolder.get(applicationContext).setMuted(true) } catch (_: Throwable) {}
+                updateNotification()
+            }
+            ACTION_UNMUTE -> {
+                try { WebRtcCoreHolder.get(applicationContext).setMuted(false) } catch (_: Throwable) {}
+                updateNotification()
+            }
+        }
+        // НЕ «липкий» сервис: живём только вместе с задачей приложения
+        return START_NOT_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Если пользователь смахнул приложение — сервис сворачиваем
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
-        try {
-            MicLevelProbe.stop()
-        } catch (_: Throwable) { }
-
-        try {
-            server?.shutdown()
-            Logger.i("CastService", "VishnuServer stopped")
-        } catch (_: Throwable) { }
-
-        // Сервис реально остановлен — сбрасываем флаг
         isRunning = false
-
-        if (Build.VERSION.SDK_INT >= 24) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
-        netMon?.stop()
-        netMon = null
+        try { server?.shutdown() } catch (_: Throwable) {}
+        server = null
+        try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // -------------------- Port picking --------------------
+    // --- HTTP/WS ---
 
-    private fun pickAvailablePort(start: Int, maxTries: Int): Int? {
-        for (p in start until (start + maxTries)) {
-            if (isTcpPortFree(p)) return p
+    private fun startHttpWsIfNeeded() {
+        if (server != null) return
+        val port = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_PORT, 8080).coerceIn(1, 65535)
+        server = VishnuServer(applicationContext, port).also {
+            // Таймаут чтения сокета — как в текущей логике; daemon=false
+            it.launch(10_000, false)
         }
-        return null
+        updateNotification()
     }
 
-    private fun isTcpPortFree(port: Int): Boolean {
-        var sock: ServerSocket? = null
-        return try {
-            sock = ServerSocket()
-            sock.reuseAddress = true
-            sock.bind(InetSocketAddress("0.0.0.0", port))
-            true
-        } catch (_: IOException) {
-            false
-        } finally {
-            try { sock?.close() } catch (_: Throwable) { }
-        }
-    }
-
-    // -------------------- Notifications --------------------
-
-    private fun createNotificationChannelIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val mgr = getSystemService(NotificationManager::class.java)
-            val existing = mgr.getNotificationChannel(CHANNEL_ID)
-            if (existing == null) {
-                val ch = NotificationChannel(
-                    CHANNEL_ID,
-                    getString(R.string.app_name),
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = "VishnuCast status"
-                    setShowBadge(false)
-                    enableLights(false)
-                    enableVibration(false)
-                }
-                mgr.createNotificationChannel(ch)
-            }
-        }
-    }
+    // --- Notification ---
 
     private fun buildRunningNotification(): Notification {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-        val pi = PendingIntent.getActivity(
-            this, 0, openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or
-                (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
-        )
+        val piOpen = PendingIntent.getActivity(this, 0, openIntent, pendingFlags())
 
-        // --- Выбираем иконку по текущему источнику (USB ↔ встроенный) ---
-        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val usb = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
-            .any { it.type == AudioDeviceInfo.TYPE_USB_HEADSET || it.type == AudioDeviceInfo.TYPE_USB_DEVICE }
-        val smallIconRes = if (usb) R.drawable.ic_headset_mic_24 else R.drawable.ic_mic_24
-        // ---------------------------------------------------------------
+        val stopIntent = Intent(this, CastService::class.java).setAction(ACTION_STOP)
+        val piStop = PendingIntent.getService(this, 1, stopIntent, pendingFlags())
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(smallIconRes)
-            .setContentTitle(getString(R.string.app_name))
-            .setContentText(getString(R.string.status_running))
-            .setContentIntent(pi)
-            .setOngoing(true) // липкое уведомление
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setOnlyAlertOnce(true)
-            .setForegroundServiceBehavior(
-                if (Build.VERSION.SDK_INT >= 31)
-                    NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE
-                else NotificationCompat.FOREGROUND_SERVICE_DEFAULT
-            )
-            .build()
-    }
-
-    private fun buildErrorNotification(msg: String): Notification {
-        val openIntent = Intent(this, MainActivity::class.java)
-        val pi = PendingIntent.getActivity(
-            this, 0, openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or
-                (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
-        )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+            // ИСПРАВЛЕНО: используем существующую иконку из mipmap
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(msg)
-            .setContentIntent(pi)
-            .setOngoing(false)
-            .setOnlyAlertOnce(true)
+            .setContentText(getString(R.string.cast_running))
+            .setContentIntent(piOpen)
+            .setOngoing(true)
+            .addAction(0, getString(R.string.action_stop), piStop)
             .build()
     }
 
-    @SuppressLint("MissingPermission", "NotificationPermission")
-    private fun safeNotify(id: Int, notif: Notification) {
-        if (Build.VERSION.SDK_INT >= 33) {
-            val granted = ContextCompat.checkSelfPermission(
-                this, android.Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                Logger.w("CastService", "POST_NOTIFICATIONS not granted on 33+; skip notify")
-                return
+    private fun updateNotification() {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIF_ID, buildRunningNotification())
+    }
+
+    private fun createNotificationChannelIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+                val ch = NotificationChannel(CHANNEL_ID, "VishnuCast", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "VishnuCast status"
+                    setShowBadge(false)
+                    enableLights(false)
+                    enableVibration(false)
+                }
+                nm.createNotificationChannel(ch)
             }
         }
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(id, notif)
+    }
+
+    private fun pendingFlags(): Int {
+        var flags = PendingIntent.FLAG_UPDATE_CURRENT
+        if (Build.VERSION.SDK_INT >= 23) flags = flags or PendingIntent.FLAG_IMMUTABLE
+        return flags
     }
 
     companion object {
         @Volatile var isRunning: Boolean = false
+
+        const val ACTION_START = "com.buligin.vishnucast.action.START"
+        const val ACTION_STOP  = "com.buligin.vishnucast.action.STOP"
+        const val ACTION_MUTE  = "com.buligin.vishnucast.action.MUTE"
+        const val ACTION_UNMUTE = "com.buligin.vishnucast.action.UNMUTE"
 
         private const val CHANNEL_ID = "vishnucast_running"
         private const val NOTIF_ID = 1001
 
         private const val PREFS = "vishnucast"
         const val KEY_PORT = "server_port"
+
+        fun ensureStarted(ctx: Context) {
+            val i = Intent(ctx, CastService::class.java).setAction(ACTION_START)
+            ContextCompat.startForegroundService(ctx, i)
+        }
     }
 }

@@ -5,6 +5,12 @@
     <string name="status_stopped">VishnuCast: остановлено</string>
     <string name="status_need_mic_perm">Нужно разрешение на микрофон</string>
     <string name="permission_denied">Доступ к микрофону отклонён</string>
+    <string name="cast_running">Трансляция запущена</string>
+    <string name="action_stop">Остановить</string>
+
+
+
+
 
     <!-- Buttons -->
     <string name="btn_start">Старт трансляции</string>
