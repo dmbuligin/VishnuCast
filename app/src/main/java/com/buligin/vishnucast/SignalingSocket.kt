@@ -54,26 +54,65 @@ class SignalingSocket(
     override fun onMessage(message: NanoWSD.WebSocketFrame) {
         try {
             val text = message.textPayload ?: return
-            val obj = JSONObject(text)
+            val obj = try { JSONObject(text) } catch (_: Throwable) { null }
+
+            if (obj == null) {
+                // не-JSON сообщения игнорируем
+                return
+            }
+
+            // --- keep-alive от клиента ---
             when (obj.optString("type", "")) {
-                "ka" -> return
-
-                "ice" -> {
-                    val cObj = obj.getJSONObject("candidate")
-                    val c = IceCandidate(
-                        cObj.optString("sdpMid", null),
-                        cObj.optInt("sdpMLineIndex", 0),
-                        cObj.optString("candidate", "")
-                    )
-                    pc?.addIceCandidate(c)
+                "ping" -> {
+                    // Можем отвечать pong (не обязательно, но полезно)
+                    try {
+                        val pong = JSONObject()
+                            .put("type", "pong")
+                            .put("t", System.currentTimeMillis())
+                        send(pong.toString())
+                    } catch (_: Throwable) {}
+                    return
                 }
+                "ka" -> return // старый no-op
+            }
 
+            // --- ICE-кандидаты (поддерживаем оба формата) ---
+            if (obj.optString("type", "") == "ice") {
+                val cObj = obj.optJSONObject("candidate") ?: JSONObject()
+                val c = IceCandidate(
+                    cObj.optString("sdpMid", null),
+                    cObj.optInt("sdpMLineIndex", 0),
+                    cObj.optString("candidate", "")
+                )
+                pc?.addIceCandidate(c)
+                return
+            } else if (obj.has("candidate")) {
+                // «плоский» формат: { candidate, sdpMid, sdpMLineIndex }
+                val candidateStr = obj.optString("candidate", null)
+                val sdpMid = obj.optString("sdpMid", null)
+                val sdpMLineIndex = obj.optInt("sdpMLineIndex", 0)
+                if (!candidateStr.isNullOrEmpty()) {
+                    val c = IceCandidate(sdpMid, sdpMLineIndex, candidateStr)
+                    pc?.addIceCandidate(c)
+                    return
+                }
+            }
+
+            // --- SDP offer ---
+            when (obj.optString("type", "")) {
                 "offer" -> {
-                    try { send(JSONObject().put("type", "ack").put("stage", "offer-received").toString()) } catch (_: Throwable) {}
+                    try {
+                        send(
+                            JSONObject()
+                                .put("type", "ack")
+                                .put("stage", "offer-received")
+                                .toString()
+                        )
+                    } catch (_: Throwable) {}
                     handleOffer(obj.getString("sdp"))
                 }
-
-                else -> {}
+                // при необходимости можно добавить обработку "bye"/"need-offer" и т.п.
+                else -> { /* no-op */ }
             }
         } catch (_: Exception) {
             try { send(JSONObject().put("type", "error").put("message", "bad message").toString()) } catch (_: Throwable) {}
@@ -145,7 +184,6 @@ class SignalingSocket(
 
     private fun startPollingIceConnected() {
         stopPolling()
-        val localPc = pc ?: return
         pollTimer = Timer("vc-icepoll", true).apply {
             schedule(object : TimerTask() {
                 override fun run() {

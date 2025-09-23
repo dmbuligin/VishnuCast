@@ -1,6 +1,33 @@
-/* VishnuCast client — quiet build (no logs), recv-only audio, single-button UI */
+/* VishnuCast client — with optional logging (default: quiet), recv-only audio, single-button UI */
 (function () {
   'use strict';
+
+  // ---------- logger (opt-in) ----------
+  var LOG = (function(){
+    var on = false;
+    try {
+      var q = new URLSearchParams(location.search || '');
+      if (q.get('log') === '1') on = true;
+    } catch(_) {}
+    try {
+      if (localStorage.getItem('vishnucast.log') === '1') on = true;
+    } catch(_) {}
+    try {
+      if (typeof window.__vc_log === 'boolean') on = on || !!window.__vc_log;
+    } catch(_) {}
+    function ts(){
+      var d = new Date();
+      return d.toISOString().replace('T',' ').replace('Z','');
+    }
+    function log(){
+      if (!on) return;
+      var args = Array.prototype.slice.call(arguments);
+      try { console.log.apply(console, ['[VishnuCast] ' + ts()].concat(args)); }
+      catch (_) { /* no-op */ }
+    }
+    return { on:on, log:log };
+  })();
+  var log = LOG.log;
 
   // ---------- tiny UI CSS ----------
   (function injectStyles(){
@@ -37,6 +64,7 @@
       lang = (l === 'ru') ? 'ru' : 'en';
       try { localStorage.setItem(storeKey, lang); } catch(_) {}
       applyTexts();
+      log('Lang set to', lang);
     }
 
     var dict = {
@@ -105,9 +133,7 @@
   var state = 'idle'; // 'idle' | 'connecting' | 'connected'
   var stopping = false;
   var reofferTimer = null;
-
-  // quiet logger (no output)
-  function log(){}
+  var keepAliveTimer = null;
 
   // ---------- Language switches ----------
   (function initLang(){
@@ -119,8 +145,13 @@
   // ---------- Button handler ----------
   if (btn) {
     btn.addEventListener('click', function(){
-      if (state === 'connected' || state === 'connecting') stopAll(true);
-      else start();
+      if (state === 'connected' || state === 'connecting') {
+        log('Button: Disconnect clicked');
+        stopAll(true);
+      } else {
+        log('Button: Connect clicked');
+        start();
+      }
     });
   }
 
@@ -133,6 +164,7 @@
     }
     statusEl.textContent = txt;
     statusEl.classList.toggle('connected', state === 'connected');
+    log('Status:', txt, '| state=', state);
   }
 
   function setBtn() {
@@ -153,6 +185,7 @@
       btn.style.backgroundColor = 'var(--vc-btn)';
       btn.style.boxShadow = '0 1px 0 rgba(0,0,0,.05),0 6px 12px rgba(37,99,235,.25)';
     }
+    log('Button updated | state=', state);
   }
 
   function wsPathFromQuery() {
@@ -168,23 +201,31 @@
 
   function makeWsUrl() {
     var proto = (location.protocol === 'https:') ? 'wss://' : 'ws://';
-    return proto + location.host + wsPathFromQuery();
+    var url = proto + location.host + wsPathFromQuery();
+    log('WS URL:', url);
+    return url;
   }
 
   function safeClosePc() {
     try { if (pc) pc.ontrack = null; } catch(_){}
     try { if (pc) pc.onicecandidate = null; } catch(_){}
     try { if (pc && pc.signalingState !== 'closed') pc.close(); } catch(_){}
+    if (pc) log('PC closed');
     pc = null;
   }
 
   function safeCloseWs() {
-    try { if (ws && ws.readyState === 1) ws.close(); } catch(_){}
+    try {
+      if (ws && ws.readyState === 1) {
+        log('WS closing by client');
+        ws.close();
+      }
+    } catch(_){}
     ws = null;
   }
 
   function resetBuffers(){}
-  function cancelReofferTimer(){ if (reofferTimer) { clearTimeout(reofferTimer); reofferTimer = null; } }
+  function cancelReofferTimer(){ if (reofferTimer) { clearTimeout(reofferTimer); reofferTimer = null; log('Re-offer timer canceled'); } }
 
   // ---------- Start / Stop ----------
   function start() {
@@ -196,8 +237,9 @@
         var AC = window.AudioContext || window.webkitAudioContext;
         if (!window.__vc_ac) window.__vc_ac = new AC();
         if (window.__vc_ac.state === 'suspended') { window.__vc_ac.resume().catch(()=>{}); }
+        log('AudioContext state:', window.__vc_ac.state);
       }
-    } catch(_) {}
+    } catch(e) { log('AudioContext error:', e); }
 
     userStopped = false;
     stopping = false;
@@ -206,37 +248,63 @@
     setStatus();
 
     var url = makeWsUrl();
-    ws = new WebSocket(url);
+    try {
+      ws = new WebSocket(url);
+      log('WS created');
+    } catch (e) {
+      log('WS create error:', e);
+      setStatus(texts.t('status_error'));
+      return;
+    }
 
     ws.onopen = function(){
-      if (userStopped) { safeCloseWs(); return; }
+      log('WS open');
+      if (userStopped) { log('WS open but user already stopped — closing'); safeCloseWs(); return; }
+        // ⬇️ keep-alive каждые 15s
+        try { if (keepAliveTimer) clearInterval(keepAliveTimer); } catch(_) {}
+        keepAliveTimer = setInterval(function(){
+          try {
+            if (ws && ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'ping', t: Date.now() }));
+              log('WS keep-alive → ping');
+            }
+          } catch(e){ log('WS keep-alive error:', e && e.message); }
+        }, 15000);
       beginWebRtc();
     };
 
-    ws.onclose = function(){
+    ws.onclose = function(ev){
+      log('WS close code=', ev.code, 'reason=', ev.reason);
+      try { if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; } } catch(_) {}
       if (!userStopped) setStatus(texts.t('ws_closed'));
       stopAll(false);
     };
 
-    ws.onerror = function(){
+    ws.onerror = function(err){
+      log('WS error:', err);
       setStatus(texts.t('status_error'));
     };
 
     ws.onmessage = function(ev){
+      log('WS message len=', (''+ev.data).length);
       handleSignal(ev.data);
     };
   }
 
   function stopAll(manual){
+
+    try { if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; } } catch(_){}
     if (manual == null) manual = false;
     if (stopping) return;
     stopping = true;
 
     userStopped = manual;
+    log('StopAll called. manual=', manual, 'state=', state);
+
     cancelReofferTimer();
     safeCloseWs();
     safeClosePc();
-    try { audioEl.srcObject = null; } catch(_) {}
+    try { audioEl.srcObject = null; } catch(e) { log('audio srcObject clear error:', e); }
     resetBuffers();
 
     state = 'idle';
@@ -260,6 +328,7 @@
 
       if (isLikelySdpString(msg)) {
         var desc = { type: (msg.indexOf('\na=fingerprint:') >= 0 ? (pc && pc.localDescription && pc.localDescription.type === 'offer' ? 'answer' : 'offer') : 'answer'), sdp: msg };
+        log('Signal: SDP string →', desc.type, 'len=', desc.sdp.length);
         onRemoteSdp(desc);
         return;
       }
@@ -269,10 +338,12 @@
           var d = (typeof msg.sdp === 'string')
             ? { type: (msg.type || 'answer'), sdp: msg.sdp }
             : { type: (msg.sdp.type || 'answer'), sdp: msg.sdp.sdp };
+          log('Signal: SDP object →', d.type, 'len=', d.sdp.length);
           onRemoteSdp(d);
           return;
         }
         if (msg.type && msg.sdp) {
+          log('Signal: flat {type,sdp} →', msg.type, 'len=', (msg.sdp||'').length);
           onRemoteSdp({ type: msg.type, sdp: msg.sdp });
           return;
         }
@@ -281,59 +352,112 @@
           if (msg.candidates && Array.isArray(msg.candidates)) arr = msg.candidates;
           else arr = [msg];
 
+          log('Signal: ICE candidates count=', arr.length);
           arr.forEach(function(c){
             var cand = c.candidate || c;
             var init = (typeof cand === 'string')
               ? { candidate: cand, sdpMid: c.sdpMid || 'audio', sdpMLineIndex: c.sdpMLineIndex || 0 }
               : cand;
-            try { pc && pc.addIceCandidate(new RTCIceCandidate(init)); } catch(e){}
+            try {
+              pc && pc.addIceCandidate(new RTCIceCandidate(init)).then(function(){
+                log('ICE add OK:', init.candidate && init.candidate.split(' ').slice(0,3).join(' '));
+              }).catch(function(e){
+                log('ICE add FAIL:', e && e.message);
+              });
+            } catch(e){
+              log('ICE add EXC:', e && e.message);
+            }
           });
           return;
         }
-        if (msg.cmd === 'bye' || msg.bye) { stopAll(false); return; }
-        if (msg.needOffer || msg.cmd === 'need-offer') { sendOffer(); return; }
+        if (msg.cmd === 'bye' || msg.bye) { log('Signal: bye'); stopAll(false); return; }
+        if (msg.needOffer || msg.cmd === 'need-offer') { log('Signal: need-offer'); sendOffer(); return; }
       }
-    } catch (_){}
+    // keep-alive ответ сервера
+    if (msg && typeof msg === 'object' && msg.type === 'pong') {
+      log('WS keep-alive ← pong', (msg.t ? ('dt=' + (Date.now() - msg.t) + 'ms') : ''));
+      return;
+    }
+      log('Signal: unrecognized payload');
+    } catch (e){
+      log('Signal handling error:', e);
+    }
   }
 
   function onRemoteSdp(desc){
-    if (!pc) { return; }
+    if (!pc) { log('onRemoteSdp: no pc'); return; }
+    log('PC setRemoteDescription:', desc.type);
     pc.setRemoteDescription(new RTCSessionDescription(desc)).then(function(){
       if (desc.type === 'offer') {
+        log('PC createAnswer');
         pc.createAnswer().then(function(ans){
+          log('PC setLocalDescription(answer)');
           return pc.setLocalDescription(ans);
-        }).then(function(){ sendAnswer(); }).catch(function(){});
+        }).then(function(){
+          log('Send answer to WS');
+          sendAnswer();
+        }).catch(function(e){
+          log('Answer path error:', e && e.message);
+        });
       }
-    }).catch(function(){});
+    }).catch(function(e){
+      log('setRemoteDescription error:', e && e.message);
+    });
   }
 
   // ---------- WebRTC ----------
   function beginWebRtc(){
-    if (!ws || ws.readyState !== 1) { return; }
+    if (!ws || ws.readyState !== 1) { log('beginWebRtc: WS not ready'); return; }
 
     var conf = { iceServers: [] };
     pc = new RTCPeerConnection(conf);
+    log('PC created');
 
-    try { pc.addTransceiver('audio', { direction: 'recvonly' }); } catch(_){}
+    try {
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+      log('PC addTransceiver recvonly(audio)');
+    } catch(e){
+      log('addTransceiver error:', e && e.message);
+    }
 
     pc.onicecandidate = function(ev){
       if (ev.candidate && ws && ws.readyState === 1) {
+        var c = ev.candidate;
+        log('ICE local candidate → send', c.candidate && c.candidate.split(' ').slice(0,3).join(' '));
         ws.send(JSON.stringify({
-          candidate: ev.candidate.candidate,
-          sdpMid: ev.candidate.sdpMid,
-          sdpMLineIndex: ev.candidate.sdpMLineIndex
+          candidate: c.candidate,
+          sdpMid: c.sdpMid,
+          sdpMLineIndex: c.sdpMLineIndex
         }));
       }
     };
 
+    pc.onicegatheringstatechange = function(){
+      log('ICE gathering state:', pc.iceGatheringState);
+    };
+    pc.oniceconnectionstatechange = function(){
+      log('ICE connection state:', pc.iceConnectionState);
+      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+        setStatus(texts.t('status_error'));
+        stopAll(false);
+      }
+    };
+    pc.onsignalingstatechange = function(){
+      log('Signaling state:', pc.signalingState);
+    };
     pc.onconnectionstatechange = function(){
+      log('PC conn state:', pc.connectionState);
       if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         setStatus(texts.t('status_error'));
         stopAll(false);
       }
     };
+    if (typeof pc.onselectedcandidatepairchange === 'function') {
+      pc.onselectedcandidatepairchange = function(e){ log('Selected candidate pair changed', e); };
+    }
 
     pc.ontrack = function(ev){
+      log('PC ontrack kind=', ev.track && ev.track.kind, 'streams=', (ev.streams||[]).length);
       try {
         var stream = (ev.streams && ev.streams[0])
           ? ev.streams[0]
@@ -347,13 +471,16 @@
 
           let tries = 0;
           (function kick(){
-            audioEl.play().catch(function(){
+            audioEl.play().then(function(){ log('audio.play OK'); }).catch(function(err){
               tries++;
+              log('audio.play FAIL try', tries, err && err.message);
               if (tries < 3) setTimeout(kick, 300);
             });
           })();
         }
-      } catch (_) {}
+      } catch (e) {
+        log('ontrack error:', e && e.message);
+      }
 
       state = 'connected';
       setBtn();
@@ -364,26 +491,35 @@
     sendOffer();
 
     reofferTimer = setTimeout(function(){
-      if (state === 'connecting' && ws && ws.readyState === 1) { sendOffer(); }
+      if (state === 'connecting' && ws && ws.readyState === 1) {
+        log('Re-send offer due to timeout');
+        sendOffer();
+      }
     }, 4000);
   }
 
   function sendOffer(){
-    if (!pc) return;
+    if (!pc) { log('sendOffer: no pc'); return; }
+    log('PC createOffer');
     pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false }).then(function(offer){
+      log('PC setLocalDescription(offer)');
       return pc.setLocalDescription(offer);
     }).then(function(){
-      if (!ws || ws.readyState !== 1) return;
-      ws.send(JSON.stringify({ type: pc.localDescription.type, sdp: pc.localDescription.sdp }));
-    }).catch(function(){
+      if (!ws || ws.readyState !== 1) { log('sendOffer: WS not ready'); return; }
+      var payload = { type: pc.localDescription.type, sdp: pc.localDescription.sdp };
+      log('WS send offer type=', payload.type, 'len=', (payload.sdp||'').length);
+      ws.send(JSON.stringify(payload));
+    }).catch(function(e){
+      log('Offer path error:', e && e.message);
       setStatus(texts.t('status_error'));
       stopAll(false);
     });
   }
 
   function sendAnswer(){
-    if (!pc || !pc.localDescription) return;
-    if (!ws || ws.readyState !== 1) return;
+    if (!pc || !pc.localDescription) { log('sendAnswer: no localDescription'); return; }
+    if (!ws || ws.readyState !== 1) { log('sendAnswer: WS not ready'); return; }
+    log('WS send answer (both formats for compatibility)');
     ws.send(JSON.stringify({ sdp: pc.localDescription }));
     ws.send(JSON.stringify({ type: pc.localDescription.type, sdp: pc.localDescription.sdp }));
   }
@@ -391,4 +527,6 @@
   // ---------- init ----------
   setBtn();
   setStatus();
+
+  log('Client boot. Log ON =', LOG.on);
 })();

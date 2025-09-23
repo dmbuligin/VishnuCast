@@ -73,7 +73,7 @@ class CastService : Service() {
         val port = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_PORT, 8080).coerceIn(1, 65535)
         server = VishnuServer(applicationContext, port).also {
             // Таймаут чтения сокета — как в текущей логике; daemon=false
-            it.launch(10_000, false)
+            it.launch(120_000, false)
         }
         updateNotification()
     }
