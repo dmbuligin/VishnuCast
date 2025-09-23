@@ -5,8 +5,10 @@
     <string name="status_stopped">VishnuCast: stopped</string>
     <string name="status_need_mic_perm">Microphone permission is required</string>
     <string name="permission_denied">Microphone permission denied</string>
-    <string name="cast_running">Casting is running</string>
     <string name="action_stop">Stop</string>
+    <string name="cast_running">Broadcast started</string>
+    <string name="cast_stopped">Broadcast stopped</string>
+    <string name="action_exit">Exit</string>
 
 
 

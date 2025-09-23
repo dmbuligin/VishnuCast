@@ -7,6 +7,8 @@
     <string name="permission_denied">Доступ к микрофону отклонён</string>
     <string name="cast_running">Трансляция запущена</string>
     <string name="action_stop">Остановить</string>
+    <string name="cast_stopped">Трансляция остановлена</string>
+    <string name="action_exit">Выход</string>
 
 
 

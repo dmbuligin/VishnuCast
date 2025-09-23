@@ -208,14 +208,16 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
 
+        registerReceiver(exitReceiver, android.content.IntentFilter(CastService.ACTION_EXIT_APP))
         // Всегда подтягиваем истину из сервиса — вдруг активити пересоздалась
         syncUiFromService()
 
-        // netMon — руками через меню/пулл-ту-рефреш
+
     }
 
     override fun onStop() {
         super.onStop()
+        try { unregisterReceiver(exitReceiver) } catch (_: Throwable) {}
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         arrowHint.stopHint()
         hideArrowHint()
@@ -504,6 +506,22 @@ class MainActivity : AppCompatActivity() {
         val muted = CastService.getSavedMute(this)
         updateUiRunning(!muted) // running = микрофон включён = !muted
     }
+
+    private val exitReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == CastService.ACTION_EXIT_APP) {
+                // закрываем окно и задачу, чтобы не было «UI без сервисов»
+                try {
+                    finishAndRemoveTask()
+                } catch (_: Throwable) {
+                    finishAffinity()
+                    finish()
+                }
+            }
+        }
+    }
+
+
 
 
 }

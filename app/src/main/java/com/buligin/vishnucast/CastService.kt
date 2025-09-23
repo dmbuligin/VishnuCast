@@ -29,24 +29,27 @@ class CastService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> {
-                // уже поднято в onCreate; оставляем для явного старта
-                startHttpWsIfNeeded()
-            }
+            ACTION_START -> startHttpWsIfNeeded()
             ACTION_STOP -> {
+                // старый "стоп" — трактуем как выход для консистентности
+                sendBroadcast(Intent(ACTION_EXIT_APP))
                 stopSelf()
                 return START_NOT_STICKY
             }
-            ACTION_MUTE -> {
+            ACTION_MUTE -> applyMute(true)
+            ACTION_UNMUTE -> applyMute(false)
+            ACTION_EXIT -> {
+                // Выход: глушим, останавливаем и говорим активити закрыться
                 applyMute(true)
-            }
-            ACTION_UNMUTE -> {
-                applyMute(false)
+                sendBroadcast(Intent(ACTION_EXIT_APP))
+                stopSelf()
+                return START_NOT_STICKY
             }
         }
-        // НЕ «липкий» сервис: живём только вместе с задачей приложения
         return START_NOT_STICKY
     }
+
+
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // Если пользователь смахнул приложение — сервис сворачиваем
@@ -95,19 +98,22 @@ class CastService : Service() {
         }
         val piOpen = PendingIntent.getActivity(this, 0, openIntent, pendingFlags())
 
-        val stopIntent = Intent(this, CastService::class.java).setAction(ACTION_STOP)
-        val piStop = PendingIntent.getService(this, 1, stopIntent, pendingFlags())
+        val exitIntent = Intent(this, CastService::class.java).setAction(ACTION_EXIT)
+        val piExit = PendingIntent.getService(this, 2, exitIntent, pendingFlags())
 
-        // Текст можно варьировать по mute/unmute, если есть разные строки; оставляю общий
+        val muted = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MUTED, true)
+        val text = if (muted) getString(R.string.cast_stopped) else getString(R.string.cast_running)
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(getString(R.string.cast_running))
+            .setContentText(text)
             .setContentIntent(piOpen)
             .setOngoing(true)
-            .addAction(0, getString(R.string.action_stop), piStop)
+            .addAction(0, getString(R.string.action_exit), piExit)
             .build()
     }
+
 
     private fun updateNotification() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -136,6 +142,11 @@ class CastService : Service() {
     }
 
     companion object {
+
+        const val ACTION_EXIT_APP = "com.buligin.vishnucast.action.EXIT_APP"
+
+        const val ACTION_EXIT = "com.buligin.vishnucast.action.EXIT"
+
         @Volatile var isRunning: Boolean = false
 
         const val ACTION_START = "com.buligin.vishnucast.action.START"
