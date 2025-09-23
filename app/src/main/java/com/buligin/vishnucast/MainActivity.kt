@@ -186,7 +186,7 @@ class MainActivity : AppCompatActivity() {
             override fun onGlobalLayout() {
                 sliderContainer.viewTreeObserver.removeOnGlobalLayoutListener(this)
                 // По умолчанию считаем «тихо» (микрофон выкл)
-                updateUiRunning(false)
+                syncUiFromService()
             }
         })
 
@@ -197,8 +197,9 @@ class MainActivity : AppCompatActivity() {
         }
         ClientCount.live.observe(this) { count -> updateClientsCount(count) }
 
-        updateUiRunning(false)
+        syncUiFromService()
         updateClientsCount(0)
+
         UpdateCheckWorker.ensureScheduled(this)
         intent?.let { handleUpdateIntent(it) }
     }
@@ -206,8 +207,10 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
-        // здесь isRunning = «микрофон включен», не состояние сервиса
-        updateUiRunning(isRunning.get())
+
+        // Всегда подтягиваем истину из сервиса — вдруг активити пересоздалась
+        syncUiFromService()
+
         // netMon — руками через меню/пулл-ту-рефреш
     }
 
@@ -496,4 +499,11 @@ class MainActivity : AppCompatActivity() {
             i.action = null
         }
     }
+
+    private fun syncUiFromService() {
+        val muted = CastService.getSavedMute(this)
+        updateUiRunning(!muted) // running = микрофон включён = !muted
+    }
+
+
 }

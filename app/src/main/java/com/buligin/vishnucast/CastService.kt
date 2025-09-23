@@ -21,8 +21,8 @@ class CastService : Service() {
         startHttpWsIfNeeded()
 
         // 2) Гарантировать инициализацию WebRTC core и включить "тишину"
-        val core = WebRtcCoreHolder.get(applicationContext)
-        try { core.setMuted(true) } catch (_: Throwable) {}
+        //    + сохранить это в префы как текущее состояние.
+        applyMute(true)
 
         isRunning = true
     }
@@ -38,12 +38,10 @@ class CastService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_MUTE -> {
-                try { WebRtcCoreHolder.get(applicationContext).setMuted(true) } catch (_: Throwable) {}
-                updateNotification()
+                applyMute(true)
             }
             ACTION_UNMUTE -> {
-                try { WebRtcCoreHolder.get(applicationContext).setMuted(false) } catch (_: Throwable) {}
-                updateNotification()
+                applyMute(false)
             }
         }
         // НЕ «липкий» сервис: живём только вместе с задачей приложения
@@ -70,11 +68,22 @@ class CastService : Service() {
 
     private fun startHttpWsIfNeeded() {
         if (server != null) return
-        val port = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_PORT, 8080).coerceIn(1, 65535)
+        val sp = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val port = sp.getInt(KEY_PORT, 8080).coerceIn(1, 65535)
         server = VishnuServer(applicationContext, port).also {
             // Таймаут чтения сокета — как в текущей логике; daemon=false
             it.launch(120_000, false)
         }
+        updateNotification()
+    }
+
+    // --- Mute state orchestration ---
+
+    private fun applyMute(muted: Boolean) {
+        try { WebRtcCoreHolder.get(applicationContext).setMuted(muted) } catch (_: Throwable) {}
+        // сохраняем флаг, чтобы активити после поворота экрана знала актуальное состояние
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_MUTED, muted).apply()
         updateNotification()
     }
 
@@ -89,8 +98,8 @@ class CastService : Service() {
         val stopIntent = Intent(this, CastService::class.java).setAction(ACTION_STOP)
         val piStop = PendingIntent.getService(this, 1, stopIntent, pendingFlags())
 
+        // Текст можно варьировать по mute/unmute, если есть разные строки; оставляю общий
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            // ИСПРАВЛЕНО: используем существующую иконку из mipmap
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(getString(R.string.cast_running))
@@ -139,6 +148,11 @@ class CastService : Service() {
 
         private const val PREFS = "vishnucast"
         const val KEY_PORT = "server_port"
+        const val KEY_MUTED = "is_muted"
+
+        /** Вспомогательная функция для UI: прочитать сохранённый mute-флаг. */
+        fun getSavedMute(ctx: Context): Boolean =
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MUTED, true)
 
         fun ensureStarted(ctx: Context) {
             val i = Intent(ctx, CastService::class.java).setAction(ACTION_START)
