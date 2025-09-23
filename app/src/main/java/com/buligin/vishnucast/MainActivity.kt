@@ -232,6 +232,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
+        R.id.action_exit -> {
+            // корректный выход: сервис сообщит активити закрыться
+            val exit = Intent(this, CastService::class.java).setAction(CastService.ACTION_EXIT)
+            ContextCompat.startForegroundService(this, exit)
+            true
+        }
         R.id.menu_settings -> {
             startActivity(Intent(this, SettingsActivity::class.java)); true
         }
