@@ -30,7 +30,7 @@
     <string name="menu_language">Язык</string>
     <string name="menu_about">О приложении</string>
     <string name="menu_check_updates">Проверить обновления</string>
-    <string name="cast_action_refresh">Обвновить QR</string>
+    <string name="cast_action_refresh">Обновить QR</string>
 
     <!-- Language dialog -->
     <string name="lang_title">Выберите язык</string>
