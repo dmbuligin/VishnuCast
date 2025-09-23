@@ -23,6 +23,9 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 
 class WebRtcCore(private val ctx: Context) {
+
+    private var guardTimer: Timer? = null
+
     private val egl = EglBase.create()
     private val adm: JavaAudioDeviceModule
     private val factory: PeerConnectionFactory
@@ -41,6 +44,61 @@ class WebRtcCore(private val ctx: Context) {
 
     // Зонд микрофона для режима «нет клиентов»
     private val probe = MicLevelProbe(ctx)
+
+    private fun startGuardTimer() {
+        try { guardTimer?.cancel() } catch (_: Throwable) {}
+        guardTimer = Timer("vc-guard", true).apply {
+            schedule(object : TimerTask() {
+                override fun run() {
+                    enforceRoutingConsistency()
+                }
+            }, 2000L, 2000L) // 2s после старта и каждые 2s
+        }
+    }
+
+    @Synchronized
+    private fun enforceRoutingConsistency() {
+        val isMuted = muted.get()
+        val clients = connectedPeerCount.get()
+        val probeRunning = probe.isRunning()
+        val statsActive = (statsPc != null && statsTimer != null)
+
+        // Мьют → всё выключить.
+        if (isMuted) {
+            if (probeRunning) { probe.stop(); d("guard: stopped probe (muted)") }
+            if (statsActive) {
+                try { statsTimer?.cancel() } catch (_: Throwable) {}
+                statsTimer = null
+                statsPc = null
+                d("guard: stopped stats (muted)")
+            }
+            return
+        }
+
+        if (clients > 0) {
+            // Должны работать stats; зонд — нет.
+            if (probeRunning) { probe.stop(); d("guard: stopped probe (clients>0)") }
+            if (!statsActive && statsPc != null) {
+                restartStatsTimer()
+                d("guard: restarted stats (clients>0)")
+            }
+        } else {
+            // Нет клиентов — должен работать зонд; stats — нет.
+            if (statsActive) {
+                try { statsTimer?.cancel() } catch (_: Throwable) {}
+                statsTimer = null
+                statsPc = null
+                d("guard: stopped stats (no clients)")
+            }
+            if (!probeRunning) {
+                probe.setRelease(LEVEL_RELEASE_PER_SEC)
+                probe.setTickMs(LEVEL_TICK_MS)
+                probe.start { level01 -> onExternalLevel(level01) }
+                d("guard: started probe (no clients)")
+            }
+        }
+    }
+
 
     // --- DIAG/LOG ---
     private fun d(msg: String) { if (LOG_ENABLED) Log.d(TAG, msg) }
@@ -90,6 +148,9 @@ class WebRtcCore(private val ctx: Context) {
         muted.set(true)
         SignalLevel.post(0)
         d("init: ADM & audioTrack ready, start muted")
+
+        startGuardTimer()
+
     }
 
     /** Включить/выключить микрофон (mute) без разрушения трека. */
@@ -399,6 +460,10 @@ class WebRtcCore(private val ctx: Context) {
         shownLevel01 = 0.0
         SignalLevel.post(0)
         d("close: resources disposed, level=0")
+
+        try { guardTimer?.cancel() } catch (_: Throwable) {}
+        guardTimer = null
+
     }
 
     companion object {
@@ -514,5 +579,9 @@ class WebRtcCore(private val ctx: Context) {
             thread = null
             shown = 0.0
         }
+
+        fun isRunning(): Boolean = running
+
+
     }
 }
