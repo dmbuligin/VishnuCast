@@ -1,11 +1,11 @@
 package com.buligin.vishnucast
 
-import androidx.appcompat.app.AppCompatDelegate
-import androidx.core.os.LocaleListCompat
-import java.util.Locale
 import android.app.Application
 import android.os.LocaleList
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import org.webrtc.PeerConnectionFactory
+import java.util.Locale
 
 class App : Application() {
 
@@ -16,33 +16,33 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
-// Холодный старт: сразу поднимаем сервис (он сам поймёт, что уже запущен)
-        CastService.ensureStarted(applicationContext)
-        // Единственная инициализация WebRTC — БЕЗ fieldTrials (как в рабочей версии)
+
+        // Явная загрузка нативной библиотеки WebRTC (подстраховка порядка загрузки)
+        try { System.loadLibrary("jingle_peerconnection_so") } catch (_: Throwable) {}
+
+        // Инициализация WebRTC — один раз на процесс, без fieldTrials
         try {
-            val initOptions = PeerConnectionFactory.InitializationOptions.builder(this)
+            val init = PeerConnectionFactory.InitializationOptions
+                .builder(applicationContext)
                 .setEnableInternalTracer(false)
                 .createInitializationOptions()
-            PeerConnectionFactory.initialize(initOptions)
+            PeerConnectionFactory.initialize(init)
         } catch (_: Throwable) {}
 
-        // 1) Выбор языка приложения
+        // Автостарт: серверы подняты, микрофон по умолчанию mute
+        CastService.ensureStarted(applicationContext)
+
+        // Язык приложения
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         val saved = prefs.getString(KEY_APP_LANG, null)
-
         val langToApply = saved ?: run {
             val sysLang = systemPrimaryLang()
             val def = if (sysLang.startsWith("ru", ignoreCase = true)) "ru" else "en"
             prefs.edit().putString(KEY_APP_LANG, def).apply()
             def
         }
-
         applyAppLanguage(langToApply)
-
-        // Автостарт сервера/сигналинга
-        CastService.ensureStarted(this)
     }
-
 
     private fun systemPrimaryLang(): String {
         val locales: LocaleList = resources.configuration.locales

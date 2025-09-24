@@ -1,10 +1,13 @@
 package com.buligin.vishnucast
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
+import androidx.core.content.ContextCompat
 import org.webrtc.*
 import org.webrtc.audio.JavaAudioDeviceModule
 import java.util.Timer
@@ -17,16 +20,12 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-// Для проверки разрешений в MicLevelProbe:
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.core.content.ContextCompat
-
 class WebRtcCore(private val ctx: Context) {
 
     private val pendingPeerCount = AtomicInteger(0)
     private var guardTimer: Timer? = null
-    private val egl = EglBase.create()
+
+    // ВАЖНО: убрали EglBase и любые видео-фабрики — проект аудио-только
     private val adm: JavaAudioDeviceModule
     private val factory: PeerConnectionFactory
     private val audioSource: AudioSource
@@ -43,106 +42,6 @@ class WebRtcCore(private val ctx: Context) {
 
     // Зонд микрофона для режима «нет клиентов»
     private val probe = MicLevelProbe(ctx)
-
-    private fun startGuardTimer() {
-        try { guardTimer?.cancel() } catch (_: Throwable) {}
-        guardTimer = Timer("vc-guard", true).apply {
-            schedule(object : TimerTask() {
-                override fun run() {
-                    enforceRoutingConsistency()
-                }
-            }, 2000L, 2000L) // 2s после старта и каждые 2s
-        }
-    }
-
-    @Synchronized
-    private fun enforceRoutingConsistency() {
-        val isMuted = muted.get()
-        val clients = connectedPeerCount.get()
-        val probeRunning = probe.isRunning()
-        val statsActive = (statsPc != null && statsTimer != null)
-        val pending = pendingPeerCount.get()
-        val hasActiveOrPending = (clients + pending) > 0
-
-
-
-        // Мьют ебаный мозгоеб!
-
-// Мьют: индикатор → 0, probe точно выключен.
-// ВАЖНО: если есть подключенные клиенты, stats НЕ трогаем — пусть крутится,
-// чтобы после UNMUTE уровень сразу ожил.
-        if (isMuted) {
-            if (probeRunning) { probe.stop(); d("guard: stopped probe (muted)") }
-
-            if (clients == 0 && statsActive) {
-                try { statsTimer?.cancel() } catch (_: Throwable) {}
-                statsTimer = null
-                statsPc = null
-                d("guard: stopped stats (muted & no clients)")
-            } else if (clients > 0 && !statsActive && statsPc != null) {
-                // На всякий случай: если вдруг таймер не крутится при наличии клиента — поднимем.
-                restartStatsTimer()
-                d("guard: restarted stats (muted & clients>0)")
-            }
-
-            d("guard: hb muted=$isMuted clients=$clients pending=${pendingPeerCount.get()} probe=$probeRunning stats=$statsActive")
-            return
-        }
-
-
-        if (hasActiveOrPending) {
-            // Идёт подключение ИЛИ есть клиенты → зонд не нужен.
-            if (probeRunning) { probe.stop(); d("guard: stopped probe (active/pending)") }
-            // Stats включаем только если уже есть клиенты и есть pc
-            if (clients > 0 && !statsActive && statsPc != null) {
-                restartStatsTimer()
-                d("guard: restarted stats (clients>0)")
-            }
-        } else {
-            // Нет клиентов и нет ожидания → должен работать зонд, stats — нет.
-            if (statsActive) {
-                try { statsTimer?.cancel() } catch (_: Throwable) {}
-                statsTimer = null
-                statsPc = null
-                d("guard: stopped stats (no clients)")
-            }
-            if (!probeRunning) {
-                probe.setRelease(LEVEL_RELEASE_PER_SEC)
-                probe.setTickMs(LEVEL_TICK_MS)
-                probe.start { level01 -> onExternalLevel(level01) }
-                d("guard: started probe (no clients)")
-            }
-        }
-
-// heartbeat
-        d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
-
-
-
-        if (clients > 0) {
-            // Должны работать stats; зонд — нет.
-            if (probeRunning) { probe.stop(); d("guard: stopped probe (clients>0)") }
-            if (!statsActive && statsPc != null) {
-                restartStatsTimer()
-                d("guard: restarted stats (clients>0)")
-            }
-        } else {
-            // Нет клиентов — должен работать зонд; stats — нет.
-            if (statsActive) {
-                try { statsTimer?.cancel() } catch (_: Throwable) {}
-                statsTimer = null
-                statsPc = null
-                d("guard: stopped stats (no clients)")
-            }
-            if (!probeRunning) {
-                probe.setRelease(LEVEL_RELEASE_PER_SEC)
-                probe.setTickMs(LEVEL_TICK_MS)
-                probe.start { level01 -> onExternalLevel(level01) }
-                d("guard: started probe (no clients)")
-            }
-        }
-    }
-
 
     // --- DIAG/LOG ---
     private fun d(msg: String) { if (LOG_ENABLED) Log.d(TAG, msg) }
@@ -162,16 +61,15 @@ class WebRtcCore(private val ctx: Context) {
             .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
             .createAudioDeviceModule()
 
-        val encoderFactory = DefaultVideoEncoderFactory(egl.eglBaseContext, true, true)
-        val decoderFactory = DefaultVideoDecoderFactory(egl.eglBaseContext)
+        val options = PeerConnectionFactory.Options().apply {
+            // «золотой» флаг
+            disableNetworkMonitor = true
+        }
 
-        val options = PeerConnectionFactory.Options().apply { disableNetworkMonitor = true }
-
+        // Аудио-только: никаких video encoder/decoder factory
         factory = PeerConnectionFactory.builder()
             .setOptions(options)
             .setAudioDeviceModule(adm)
-            .setVideoEncoderFactory(encoderFactory)
-            .setVideoDecoderFactory(decoderFactory)
             .createPeerConnectionFactory()
 
         // Софт-флаги (AEC/NS/AGC(+2))
@@ -194,7 +92,92 @@ class WebRtcCore(private val ctx: Context) {
         d("init: ADM & audioTrack ready, start muted")
 
         startGuardTimer()
+    }
 
+    private fun startGuardTimer() {
+        try { guardTimer?.cancel() } catch (_: Throwable) {}
+        guardTimer = Timer("vc-guard", true).apply {
+            schedule(object : TimerTask() {
+                override fun run() {
+                    enforceRoutingConsistency()
+                }
+            }, 2000L, 2000L) // 2s после старта и каждые 2s
+        }
+    }
+
+    @Synchronized
+    private fun enforceRoutingConsistency() {
+        val isMuted = muted.get()
+        val clients = connectedPeerCount.get()
+        val probeRunning = probe.isRunning()
+        val statsActive = (statsPc != null && statsTimer != null)
+        val pending = pendingPeerCount.get()
+        val hasActiveOrPending = (clients + pending) > 0
+
+        // MUTE: индикатор → 0, probe выключен; stats оставляем при наличии клиентов
+        if (isMuted) {
+            if (probeRunning) { probe.stop(); d("guard: stopped probe (muted)") }
+
+            if (clients == 0 && statsActive) {
+                try { statsTimer?.cancel() } catch (_: Throwable) {}
+                statsTimer = null
+                statsPc = null
+                d("guard: stopped stats (muted & no clients)")
+            } else if (clients > 0 && !statsActive && statsPc != null) {
+                restartStatsTimer()
+                d("guard: restarted stats (muted & clients>0)")
+            }
+
+            d("guard: hb muted=$isMuted clients=$clients pending=${pendingPeerCount.get()} probe=$probeRunning stats=$statsActive")
+            return
+        }
+
+        if (hasActiveOrPending) {
+            // Идёт подключение ИЛИ есть клиенты → зонд не нужен.
+            if (probeRunning) { probe.stop(); d("guard: stopped probe (active/pending)") }
+            if (clients > 0 && !statsActive && statsPc != null) {
+                restartStatsTimer()
+                d("guard: restarted stats (clients>0)")
+            }
+        } else {
+            // Нет клиентов и нет ожидания → должен работать зонд, stats — нет.
+            if (statsActive) {
+                try { statsTimer?.cancel() } catch (_: Throwable) {}
+                statsTimer = null
+                statsPc = null
+                d("guard: stopped stats (no clients)")
+            }
+            if (!probeRunning) {
+                probe.setRelease(LEVEL_RELEASE_PER_SEC)
+                probe.setTickMs(LEVEL_TICK_MS)
+                probe.start { level01 -> onExternalLevel(level01) }
+                d("guard: started probe (no clients)")
+            }
+        }
+
+        // heartbeat
+        d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
+
+        if (clients > 0) {
+            if (probeRunning) { probe.stop(); d("guard: stopped probe (clients>0)") }
+            if (!statsActive && statsPc != null) {
+                restartStatsTimer()
+                d("guard: restarted stats (clients>0)")
+            }
+        } else {
+            if (statsActive) {
+                try { statsTimer?.cancel() } catch (_: Throwable) {}
+                statsTimer = null
+                statsPc = null
+                d("guard: stopped stats (no clients)")
+            }
+            if (!probeRunning) {
+                probe.setRelease(LEVEL_RELEASE_PER_SEC)
+                probe.setTickMs(LEVEL_TICK_MS)
+                probe.start { level01 -> onExternalLevel(level01) }
+                d("guard: started probe (no clients)")
+            }
+        }
     }
 
     /** Включить/выключить микрофон (mute) без разрушения трека. */
@@ -252,10 +235,8 @@ class WebRtcCore(private val ctx: Context) {
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) { /* no-op */ }
 
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
-
                 when (state) {
                     PeerConnection.IceConnectionState.CONNECTED -> {
-                        // Подключение состоялось
                         pendingPeerCount.updateAndGet { n -> if (n > 0) n - 1 else 0 }
                         val n = connectedPeerCount.incrementAndGet()
                         ClientCount.post(n)
@@ -270,8 +251,6 @@ class WebRtcCore(private val ctx: Context) {
                     PeerConnection.IceConnectionState.CLOSED,
                     PeerConnection.IceConnectionState.FAILED,
                     PeerConnection.IceConnectionState.DISCONNECTED -> {
-                        // Отключение: если это был «ожидающий» PC, уменьшим pending,
-                        // иначе уменьшать будем клиентов.
                         if (connectedPeerCount.get() > 0) {
                             val n = connectedPeerCount.decrementAndGet().coerceAtLeast(0)
                             ClientCount.post(n)
@@ -285,17 +264,13 @@ class WebRtcCore(private val ctx: Context) {
                                 d("PC $state: clients=$n → stats=KEEP")
                             }
                         } else {
-                            // Не было клиентов — значит, рвался pending PC
                             pendingPeerCount.updateAndGet { n -> if (n > 0) n - 1 else 0 }
                             d("PC $state: pending now ${pendingPeerCount.get()}")
                         }
                     }
                     else -> { /* no-op for NEW/CHECKING/COMPLETED */ }
                 }
-
-
             }
-
 
             override fun onStandardizedIceConnectionChange(newState: PeerConnection.IceConnectionState?) {}
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {}
@@ -318,13 +293,12 @@ class WebRtcCore(private val ctx: Context) {
         val sender = pc.addTrack(audioTrack, listOf("vishnu_audio_stream"))
         d("createPeerConnection: addTrack sender=${sender != null}")
 
-// Отмечаем «ожидаем подключение». Stats включим только на CONNECTED.
+        // Отмечаем «ожидаем подключение». Stats включим только на CONNECTED.
         pendingPeerCount.incrementAndGet()
         statsPc = pc  // просто помним актуальный pc; таймер пока НЕ запускаем
         d("createPeerConnection: pending += 1; waiting CONNECTED to start stats")
 
         return pc
-
     }
 
     /** Перегрузка под PeerManager: применяем удалённый SDP и дергаем onSet() при успехе. */
@@ -502,12 +476,10 @@ class WebRtcCore(private val ctx: Context) {
         try { audioTrack.dispose() } catch (_: Throwable) {}
         try { audioSource.dispose() } catch (_: Throwable) {}
         try { factory.dispose() } catch (_: Throwable) {}
-        try { egl.release() } catch (_: Throwable) {}
         try { statsTimer?.cancel() } catch (_: Throwable) {}
 
         statsTimer = null
         statsPc = null
-
         probe.stop()
 
         lastEnergy = null
@@ -519,12 +491,8 @@ class WebRtcCore(private val ctx: Context) {
         try { guardTimer?.cancel() } catch (_: Throwable) {}
         guardTimer = null
 
-        try { guardTimer?.cancel() } catch (_: Throwable) {}
-        guardTimer = null
         pendingPeerCount.set(0)
         connectedPeerCount.set(0)
-
-
     }
 
     companion object {
@@ -532,9 +500,9 @@ class WebRtcCore(private val ctx: Context) {
         @Volatile var LEVEL_TICK_MS: Int = 120
         /**
          * Скорость затухания («release») в долях шкалы за секунду.
-         * (Тебе понравилось 1.50 — можно выставить в любом месте: WebRtcCore.LEVEL_RELEASE_PER_SEC=1.50)
+         * (Рекомендовано 1.50 по вашей шпаргалке 1.5)
          */
-        @Volatile var LEVEL_RELEASE_PER_SEC: Double = 0.60
+        @Volatile var LEVEL_RELEASE_PER_SEC: Double = 1.50
 
         /** Диагностика в Logcat (TAG="VishnuCast"). */
         @Volatile var LOG_ENABLED: Boolean = true
@@ -547,7 +515,7 @@ class WebRtcCore(private val ctx: Context) {
         @Volatile private var running = false
         @Volatile private var thread: Thread? = null
         @Volatile private var tickMs = 120
-        @Volatile private var releasePerSec = 0.6
+        @Volatile private var releasePerSec = 1.5
         @Volatile private var shown = 0.0
 
         fun setTickMs(ms: Int) { tickMs = ms.coerceIn(60, 500) }
@@ -642,7 +610,5 @@ class WebRtcCore(private val ctx: Context) {
         }
 
         fun isRunning(): Boolean = running
-
-
     }
 }
