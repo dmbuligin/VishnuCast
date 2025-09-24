@@ -153,12 +153,17 @@ class MainActivity : AppCompatActivity() {
         btnToggle = findViewById(R.id.btnToggle)
 
         btnExit = findViewById(R.id.btnExit)
-        btnExit.setOnClickListener { confirmExit() }
+
         btnExit.setOnLongClickListener {
             try { it.performHapticFeedback(HapticFeedbackConstants.CONFIRM) } catch (_: Throwable) {}
-            performExitFromUi()   // мгновенный выход по длинному тапу
+            performExitFromUi()   // без диалога, мгновенно
             true
         }
+        btnExit.setOnClickListener {
+            Toast.makeText(this, getString(R.string.hold_to_toggle) /* или свой текст "Удерживайте для выхода" */,
+                Toast.LENGTH_SHORT).show()
+        }
+
 
 
 
@@ -187,9 +192,21 @@ class MainActivity : AppCompatActivity() {
             setMicEnabled(wantEnable)
             true
         }
-        // Короткий тап — подсказка
         btnToggle.setOnClickListener {
-            Toast.makeText(this, getString(R.string.hold_to_toggle), Toast.LENGTH_SHORT).show()
+            val wantEnable = !isRunning.get()
+
+            if (wantEnable) {
+                val micGranted = ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+                if (!micGranted) {
+                    pendingUnmute = true
+                    requestRecordAudio.launch(Manifest.permission.RECORD_AUDIO)
+                    return@setOnClickListener
+                }
+            }
+
+            setMicEnabled(wantEnable)
         }
 
         sliderContainer.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
@@ -502,14 +519,7 @@ class MainActivity : AppCompatActivity() {
         updateUiRunning(!muted)
     }
 
-    private fun confirmExit() {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.exit_confirm_title)
-            .setMessage(R.string.exit_confirm_msg)
-            .setPositiveButton(R.string.exit_confirm_yes) { _, _ -> performExitFromUi() }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
+
 
 
 
