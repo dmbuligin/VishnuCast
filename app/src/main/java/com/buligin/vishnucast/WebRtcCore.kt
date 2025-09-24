@@ -64,19 +64,31 @@ class WebRtcCore(private val ctx: Context) {
         val pending = pendingPeerCount.get()
         val hasActiveOrPending = (clients + pending) > 0
 
-// Мьют → всё выключить.
+
+
+        // Мьют ебаный мозгоеб!
+
+// Мьют: индикатор → 0, probe точно выключен.
+// ВАЖНО: если есть подключенные клиенты, stats НЕ трогаем — пусть крутится,
+// чтобы после UNMUTE уровень сразу ожил.
         if (isMuted) {
             if (probeRunning) { probe.stop(); d("guard: stopped probe (muted)") }
-            if (statsActive) {
+
+            if (clients == 0 && statsActive) {
                 try { statsTimer?.cancel() } catch (_: Throwable) {}
                 statsTimer = null
                 statsPc = null
-                d("guard: stopped stats (muted)")
+                d("guard: stopped stats (muted & no clients)")
+            } else if (clients > 0 && !statsActive && statsPc != null) {
+                // На всякий случай: если вдруг таймер не крутится при наличии клиента — поднимем.
+                restartStatsTimer()
+                d("guard: restarted stats (muted & clients>0)")
             }
-            // heartbeat
-            d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
+
+            d("guard: hb muted=$isMuted clients=$clients pending=${pendingPeerCount.get()} probe=$probeRunning stats=$statsActive")
             return
         }
+
 
         if (hasActiveOrPending) {
             // Идёт подключение ИЛИ есть клиенты → зонд не нужен.
