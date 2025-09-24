@@ -46,8 +46,6 @@ import android.net.wifi.WifiManager
 import android.net.Uri
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import android.view.HapticFeedbackConstants
-import android.content.BroadcastReceiver
-import android.content.IntentFilter
 import android.widget.Button
 
 class MainActivity : AppCompatActivity() {
@@ -95,7 +93,7 @@ class MainActivity : AppCompatActivity() {
         TextViewCompat.setCompoundDrawableTintList(tvStatus, ColorStateList.valueOf(Color.parseColor("#6B7280")))
     }
 
-    // ===== Runtime permissions =====
+    // ===== Permissions =====
     private val requestRecordAudio =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (!granted) {
@@ -115,10 +113,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Поднимаем сервисы при старте окна
         CastService.ensureStarted(applicationContext)
 
-        // Android 13+ — запрос на показ foreground-уведомления (без него шторка скрыта)
+        // Android 13+ — запрос на показ foreground-уведомления
         if (Build.VERSION.SDK_INT >= 33) {
             if (ContextCompat.checkSelfPermission(
                     this, Manifest.permission.POST_NOTIFICATIONS
@@ -196,30 +193,25 @@ class MainActivity : AppCompatActivity() {
         updateClientsCount(0)
 
         UpdateCheckWorker.ensureScheduled(this)
+
+        // Обработаем прямой экшен из уведомления
+        handleExitNowIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleExitNowIntent(intent)
+        handleUpdateIntent(intent)
     }
 
     override fun onStart() {
         super.onStart()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
-
-        // Регистрируем ресивер EXIT_APP ТОЛЬКО здесь
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(
-                exitReceiver,
-                IntentFilter(CastService.ACTION_EXIT_APP),
-                Context.RECEIVER_NOT_EXPORTED
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(exitReceiver, IntentFilter(CastService.ACTION_EXIT_APP))
-        }
-
         syncUiFromService()
     }
 
     override fun onStop() {
         super.onStop()
-        try { unregisterReceiver(exitReceiver) } catch (_: Throwable) {}
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         arrowHint.stopHint()
         hideArrowHint()
@@ -233,20 +225,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
-        R.id.action_exit -> {
-            // Просим сервис выйти (он пошлёт ACTION_EXIT_APP → мы закроем Activity)
-            val exit = Intent(this, CastService::class.java).setAction(CastService.ACTION_EXIT)
-            try {
-                if (Build.VERSION.SDK_INT >= 26) startForegroundService(exit) else startService(exit)
-            } catch (_: Throwable) {}
-            true
-        }
+        R.id.action_exit -> { performExitFromUi(); true }
         R.id.menu_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
         R.id.action_language -> { showLanguagePicker(); true }
         R.id.action_check_updates -> { checkForUpdates(); true }
         R.id.action_about -> { startActivity(Intent(this, AboutActivity::class.java)); true }
         R.id.action_refresh -> { refreshNetworkUi(); true }
         else -> super.onOptionsItemSelected(item)
+    }
+
+    // ===== Exit orchestration =====
+    private fun handleExitNowIntent(i: Intent?) {
+        if (i?.action == CastService.ACTION_EXIT_NOW) {
+            performExitFromUi()
+            i.action = null
+        }
+    }
+
+    private fun performExitFromUi() {
+        // 1) Попросим сервис корректно остановиться (mute + stopForeground + stopSelf)
+        val exit = Intent(this, CastService::class.java).setAction(CastService.ACTION_EXIT)
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(exit) else startService(exit)
+        } catch (_: Throwable) {}
+
+        // 2) Закрываем задачу приложения
+        try {
+            finishAndRemoveTask()
+        } catch (_: Throwable) {
+            finishAffinity(); finish()
+        }
     }
 
     // ===== Mic control =====
@@ -294,7 +302,7 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         val checkedIndex = if (currentLangCode() == "ru") 0 else 1
         AlertDialog.Builder(this)
-            .setTitle(getString(R.string.lang_title))
+            .setTitle(R.string.lang_title)
             .setSingleChoiceItems(items, checkedIndex) { dialog, which ->
                 val chosen = if (which == 0) "ru" else "en"
                 prefs.edit().putString(KEY_APP_LANG, chosen).apply()
@@ -461,19 +469,19 @@ class MainActivity : AppCompatActivity() {
         b.show()
     }
 
+    private fun handleUpdateIntent(i: Intent) {
+        if (i.action == UpdateProtocol.ACTION_DOWNLOAD_UPDATE) {
+            val url  = i.getStringExtra(UpdateProtocol.EXTRA_UPDATE_URL)
+            val name = i.getStringExtra(UpdateProtocol.EXTRA_UPDATE_NAME) ?: "VishnuCast-update.apk"
+            if (!url.isNullOrBlank()) {
+                ApkDownloader.downloadAndInstall(this, url, name)
+            }
+            i.action = null
+        }
+    }
+
     private fun syncUiFromService() {
         val muted = CastService.getSavedMute(this)
         updateUiRunning(!muted)
-    }
-
-    // ===== EXIT broadcast =====
-    private val exitReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == CastService.ACTION_EXIT_APP) {
-                try { finishAndRemoveTask() } catch (_: Throwable) {
-                    finishAffinity(); finish()
-                }
-            }
-        }
     }
 }

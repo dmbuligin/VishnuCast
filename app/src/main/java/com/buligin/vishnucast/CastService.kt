@@ -60,10 +60,7 @@ class CastService : Service() {
         // 1) Глушим микрофон
         applyMute(true)
 
-        // 2) Сообщаем Activity закрыться
-        try { sendBroadcast(Intent(ACTION_EXIT_APP)) } catch (_: Throwable) {}
-
-        // 3) Снимаем FGS-уведомление и останавливаем сервис
+        // 2) Снимаем FGS-уведомление и останавливаем сервис
         try { stopForeground(true) } catch (_: Throwable) {}
         stopSelf()
     }
@@ -123,9 +120,12 @@ class CastService : Service() {
         }
         val piOpen = PendingIntent.getActivity(this, 0, openIntent, pendingFlags())
 
-        // Кнопка "Выход" — запускает действие сервиса ACTION_EXIT
-        val exitIntent = Intent(this, CastService::class.java).setAction(ACTION_EXIT)
-        val piExit = PendingIntent.getService(this, 2, exitIntent, pendingFlags())
+        // Кнопка "Выход" — открывает Activity с ACTION_EXIT_NOW (без broadcast)
+        val exitIntent = Intent(this, MainActivity::class.java).apply {
+            action = ACTION_EXIT_NOW
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        val piExit = PendingIntent.getActivity(this, 10, exitIntent, pendingFlags())
 
         val muted = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MUTED, true)
         val text = if (muted) getString(R.string.cast_stopped) else getString(R.string.cast_running)
@@ -169,7 +169,7 @@ class CastService : Service() {
     }
 
     companion object {
-        const val ACTION_EXIT_APP = "com.buligin.vishnucast.action.EXIT_APP"
+        const val ACTION_EXIT_NOW = "com.buligin.vishnucast.action.EXIT_NOW" // интент в Activity
         const val ACTION_EXIT = "com.buligin.vishnucast.action.EXIT"
 
         @Volatile var isRunning: Boolean = false
