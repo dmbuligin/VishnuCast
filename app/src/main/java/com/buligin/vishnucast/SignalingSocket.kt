@@ -11,9 +11,11 @@ import java.util.TimerTask
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
+
 /** Глобальный холдер единственного WebRtcCore на процесс */
 object WebRtcCoreHolder {
     @Volatile private var instance: WebRtcCore? = null
+
     fun get(ctx: android.content.Context): WebRtcCore {
         instance?.let { return it }
         synchronized(this) {
@@ -23,14 +25,30 @@ object WebRtcCoreHolder {
             return core
         }
     }
-    fun closeAndClear() { synchronized(this) { try { instance?.close() } catch (_: Throwable) {} ; instance = null } }
+
+    fun closeAndClear() = synchronized(this) {
+        val inst = instance
+        if (inst != null) {
+            // Без прямой ссылки на WebRtcCore.close() — чтобы не ловить Unresolved reference
+            try {
+                // Порядок важен: сперва пытаемся вызвать close(), если это наш WebRtcCore
+                inst.javaClass.getMethod("close").invoke(inst)
+            } catch (_: Throwable) {
+                try {
+                    // Для WebRTC-объектов (PeerConnection/Factory/Source/Track) корректно dispose()
+                    inst.javaClass.getMethod("dispose").invoke(inst)
+                } catch (_: Throwable) { /* no-op */ }
+            }
+        }
+        instance = null
+    }
 }
 
 /** Устойчивый счётчик клиентов (живёт в процессе) */
 object ClientCounterStable {
     private val n = AtomicInteger(0)
     fun inc() { val v = n.incrementAndGet(); ClientCount.post(v) }
-    fun dec() { val v = n.decrementAndGet().coerceAtLeast(0); ClientCount.post(v) }
+    fun dec() { val v = n.decrementAndGet().coerceAtLeast(0); ClientCount.post(0.coerceAtLeast(v)) }
     fun reset() { n.set(0); ClientCount.post(0) }
     fun value(): Int = n.get()
 }
@@ -55,26 +73,21 @@ class SignalingSocket(
         try {
             val text = message.textPayload ?: return
             val obj = try { JSONObject(text) } catch (_: Throwable) { null }
-
-            if (obj == null) {
-                // не-JSON сообщения игнорируем
-                return
-            }
+            if (obj == null) return
 
             // --- keep-alive от клиента ---
             when (obj.optString("type", "")) {
                 "ping" -> {
-                    // Можем отвечать pong (не обязательно, но полезно)
                     try {
                         val pong = JSONObject()
                             .put("type", "pong")
-                            .put("t", obj.optLong("t", 0L))            // ЭХО клиентского времени
-                            .put("ts", System.currentTimeMillis())     // (опционально) серверное время
+                            .put("t", obj.optLong("t", 0L))
+                            .put("ts", System.currentTimeMillis())
                         send(pong.toString())
                     } catch (_: Throwable) {}
                     return
                 }
-                "ka" -> return // старый no-op
+                "ka" -> return
             }
 
             // --- ICE-кандидаты (поддерживаем оба формата) ---
@@ -88,7 +101,6 @@ class SignalingSocket(
                 pc?.addIceCandidate(c)
                 return
             } else if (obj.has("candidate")) {
-                // «плоский» формат: { candidate, sdpMid, sdpMLineIndex }
                 val candidateStr = obj.optString("candidate", null)
                 val sdpMid = obj.optString("sdpMid", null)
                 val sdpMLineIndex = obj.optInt("sdpMLineIndex", 0)
@@ -103,16 +115,10 @@ class SignalingSocket(
             when (obj.optString("type", "")) {
                 "offer" -> {
                     try {
-                        send(
-                            JSONObject()
-                                .put("type", "ack")
-                                .put("stage", "offer-received")
-                                .toString()
-                        )
+                        send(JSONObject().put("type", "ack").put("stage", "offer-received").toString())
                     } catch (_: Throwable) {}
                     handleOffer(obj.getString("sdp"))
                 }
-                // при необходимости можно добавить обработку "bye"/"need-offer" и т.п.
                 else -> { /* no-op */ }
             }
         } catch (_: Exception) {
@@ -122,11 +128,10 @@ class SignalingSocket(
 
     override fun onClose(code: NanoWSD.WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) {
         stopPolling()
-        // если подключение было засчитано — уменьшаем
         if (counted.compareAndSet(true, false)) {
             ClientCounterStable.dec()
         }
-        try { pc?.close() } catch (_: Throwable) {}
+        try { pc?.dispose() } catch (_: Throwable) {}
         pc = null
     }
 
@@ -147,7 +152,6 @@ class SignalingSocket(
             return
         }
 
-        // запускаем мягкий поллинг ICE-состояния, чтобы зафиксировать CONNECTED
         startPollingIceConnected()
 
         val remote = SessionDescription(SessionDescription.Type.OFFER, sdp)

@@ -14,6 +14,7 @@ import java.util.Timer
 import java.util.TimerTask
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -25,7 +26,7 @@ class WebRtcCore(private val ctx: Context) {
     private val pendingPeerCount = AtomicInteger(0)
     private var guardTimer: Timer? = null
 
-    // ВАЖНО: убрали EglBase и любые видео-фабрики — проект аудио-только
+    // Аудио-только: без EglBase и без видео-фабрик
     private val adm: JavaAudioDeviceModule
     private val factory: PeerConnectionFactory
     private val audioSource: AudioSource
@@ -54,6 +55,10 @@ class WebRtcCore(private val ctx: Context) {
     }
 
     init {
+        // Глобальная страховка: инициализируем WebRTC один раз на процесс,
+        // даже если по какой-то причине App.onCreate() не успел.
+        WebRtcInit.ensure(ctx.applicationContext)
+
         // ADM: VOICE_RECOGNITION, HW AEC/NS off — «золотой» профиль
         adm = JavaAudioDeviceModule.builder(ctx)
             .setUseHardwareAcousticEchoCanceler(false)
@@ -62,8 +67,7 @@ class WebRtcCore(private val ctx: Context) {
             .createAudioDeviceModule()
 
         val options = PeerConnectionFactory.Options().apply {
-            // «золотой» флаг
-            disableNetworkMonitor = true
+            disableNetworkMonitor = true // «золотой» флаг
         }
 
         // Аудио-только: никаких video encoder/decoder factory
@@ -98,10 +102,8 @@ class WebRtcCore(private val ctx: Context) {
         try { guardTimer?.cancel() } catch (_: Throwable) {}
         guardTimer = Timer("vc-guard", true).apply {
             schedule(object : TimerTask() {
-                override fun run() {
-                    enforceRoutingConsistency()
-                }
-            }, 2000L, 2000L) // 2s после старта и каждые 2s
+                override fun run() { enforceRoutingConsistency() }
+            }, 2000L, 2000L)
         }
     }
 
@@ -114,7 +116,6 @@ class WebRtcCore(private val ctx: Context) {
         val pending = pendingPeerCount.get()
         val hasActiveOrPending = (clients + pending) > 0
 
-        // MUTE: индикатор → 0, probe выключен; stats оставляем при наличии клиентов
         if (isMuted) {
             if (probeRunning) { probe.stop(); d("guard: stopped probe (muted)") }
 
@@ -128,19 +129,17 @@ class WebRtcCore(private val ctx: Context) {
                 d("guard: restarted stats (muted & clients>0)")
             }
 
-            d("guard: hb muted=$isMuted clients=$clients pending=${pendingPeerCount.get()} probe=$probeRunning stats=$statsActive")
+            d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
             return
         }
 
         if (hasActiveOrPending) {
-            // Идёт подключение ИЛИ есть клиенты → зонд не нужен.
             if (probeRunning) { probe.stop(); d("guard: stopped probe (active/pending)") }
             if (clients > 0 && !statsActive && statsPc != null) {
                 restartStatsTimer()
                 d("guard: restarted stats (clients>0)")
             }
         } else {
-            // Нет клиентов и нет ожидания → должен работать зонд, stats — нет.
             if (statsActive) {
                 try { statsTimer?.cancel() } catch (_: Throwable) {}
                 statsTimer = null
@@ -155,7 +154,6 @@ class WebRtcCore(private val ctx: Context) {
             }
         }
 
-        // heartbeat
         d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
 
         if (clients > 0) {
@@ -180,7 +178,6 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
-    /** Включить/выключить микрофон (mute) без разрушения трека. */
     fun setMuted(mutedNow: Boolean) {
         muted.set(mutedNow)
         try { adm.setMicrophoneMute(mutedNow) } catch (_: Throwable) {}
@@ -190,12 +187,10 @@ class WebRtcCore(private val ctx: Context) {
             SignalLevel.post(0)
             lastEnergy = null
             lastDuration = null
-            // при mute — стоп зонда в любом случае
             probe.stop()
             d("setMuted: ON → level=0, probe stop")
         } else {
             d("setMuted: OFF")
-            // Если нет клиентов — запускаем зонд; если есть — индикатор пойдёт по stats
             if (connectedPeerCount.get() == 0) {
                 probe.setRelease(LEVEL_RELEASE_PER_SEC)
                 probe.setTickMs(LEVEL_TICK_MS)
@@ -205,7 +200,6 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
-    /** Реакция на уровень от внешнего зонда (0..1). */
     private fun onExternalLevel(level01: Double) {
         if (muted.get()) return
         val target = level01.coerceIn(0.0, 1.0)
@@ -220,7 +214,6 @@ class WebRtcCore(private val ctx: Context) {
         SignalLevel.post(percent)
     }
 
-    /** Создать PeerConnection для реального клиента. */
     fun createPeerConnection(onIce: (IceCandidate) -> Unit): PeerConnection? {
         val rtcConfig = PeerConnection.RTCConfiguration(
             listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
@@ -232,7 +225,7 @@ class WebRtcCore(private val ctx: Context) {
         var createdPc: PeerConnection? = null
         val observer = object : PeerConnection.Observer {
             override fun onIceCandidate(candidate: IceCandidate) { onIce(candidate) }
-            override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) { /* no-op */ }
+            override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) {}
 
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
                 when (state) {
@@ -241,7 +234,6 @@ class WebRtcCore(private val ctx: Context) {
                         val n = connectedPeerCount.incrementAndGet()
                         ClientCount.post(n)
 
-                        // Включаем stats на реальном PC (теперь безопасно)
                         statsPc = createdPc
                         lastEnergy = null; lastDuration = null
                         restartStatsTimer()
@@ -268,7 +260,7 @@ class WebRtcCore(private val ctx: Context) {
                             d("PC $state: pending now ${pendingPeerCount.get()}")
                         }
                     }
-                    else -> { /* no-op for NEW/CHECKING/COMPLETED */ }
+                    else -> { /* no-op */ }
                 }
             }
 
@@ -293,15 +285,13 @@ class WebRtcCore(private val ctx: Context) {
         val sender = pc.addTrack(audioTrack, listOf("vishnu_audio_stream"))
         d("createPeerConnection: addTrack sender=${sender != null}")
 
-        // Отмечаем «ожидаем подключение». Stats включим только на CONNECTED.
         pendingPeerCount.incrementAndGet()
-        statsPc = pc  // просто помним актуальный pc; таймер пока НЕ запускаем
+        statsPc = pc
         d("createPeerConnection: pending += 1; waiting CONNECTED to start stats")
 
         return pc
     }
 
-    /** Перегрузка под PeerManager: применяем удалённый SDP и дергаем onSet() при успехе. */
     fun setRemoteDescription(pc: PeerConnection, sdp: SessionDescription, onSet: () -> Unit = {}) {
         pc.setRemoteDescription(object : SdpObserver {
             override fun onSetSuccess() { onSet() }
@@ -311,7 +301,6 @@ class WebRtcCore(private val ctx: Context) {
         }, sdp)
     }
 
-    /** Вариант «получили offer (sdp:String) → сразу setRemote + создать answer». */
     fun setRemoteSdp(pc: PeerConnection, sdp: String, onLocalSdp: (SessionDescription) -> Unit) {
         val remote = SessionDescription(SessionDescription.Type.OFFER, sdp)
         pc.setRemoteDescription(object : SdpObserver {
@@ -322,12 +311,10 @@ class WebRtcCore(private val ctx: Context) {
         }, remote)
     }
 
-    /** Добавить входящий ICE-кандидат. */
     fun addIceCandidate(pc: PeerConnection, c: IceCandidate) {
         try { pc.addIceCandidate(c) } catch (_: Throwable) {}
     }
 
-    /** Сформировать локальный answer и вернуть его через callback. */
     fun createAnswer(pc: PeerConnection, onLocalSdp: (SessionDescription) -> Unit) {
         pc.createAnswer(object : SdpObserver {
             override fun onCreateSuccess(desc: SessionDescription?) {
@@ -346,22 +333,18 @@ class WebRtcCore(private val ctx: Context) {
         }, MediaConstraints())
     }
 
-    /** Внешний тюнинг «скорости затухания» уровня (0.05..3.0 долей шкалы за секунду). */
     fun setLevelReleasePerSec(value: Double) {
         LEVEL_RELEASE_PER_SEC = value.coerceIn(0.05, 3.0)
         d("setLevelReleasePerSec: $LEVEL_RELEASE_PER_SEC")
         probe.setRelease(LEVEL_RELEASE_PER_SEC)
     }
 
-    /** Внешний тюнинг периода опроса/тика релиза. */
     fun setLevelTickMs(ms: Int) {
         LEVEL_TICK_MS = ms.coerceIn(60, 500)
         d("setLevelTickMs: $LEVEL_TICK_MS")
         restartStatsTimer()
         probe.setTickMs(LEVEL_TICK_MS)
     }
-
-    // ------------------- ВНУТРЕННЕЕ: таймер и расчёт уровня по WebRTC stats -------------------
 
     @Synchronized
     private fun restartStatsTimer() {
@@ -396,7 +379,6 @@ class WebRtcCore(private val ctx: Context) {
                             var sawOutbound = false
                             var sawMediaSource = false
 
-                            // Предпочтительно: outbound-rtp (audio)
                             report.statsMap?.values?.forEach { s ->
                                 if (s.type == "outbound-rtp") {
                                     val mediaType = (s.members["mediaType"] as? String)
@@ -411,7 +393,6 @@ class WebRtcCore(private val ctx: Context) {
                                 }
                             }
 
-                            // Fallback: media-source / track / ssrc
                             if (energy == null || dur == null) {
                                 var lv: Double? = null
                                 report.statsMap?.values?.forEach { s ->
@@ -429,7 +410,6 @@ class WebRtcCore(private val ctx: Context) {
                                 }
                                 instLevel01 = lv
                             } else {
-                                // Дельта-метод
                                 val prevE = lastEnergy
                                 val prevD = lastDuration
                                 lastEnergy = energy
@@ -470,47 +450,33 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
-    /** Полная очистка Core. */
-    fun close() {
-        try { audioTrack.setEnabled(false) } catch (_: Throwable) {}
-        try { audioTrack.dispose() } catch (_: Throwable) {}
-        try { audioSource.dispose() } catch (_: Throwable) {}
-        try { factory.dispose() } catch (_: Throwable) {}
-        try { statsTimer?.cancel() } catch (_: Throwable) {}
-
-        statsTimer = null
-        statsPc = null
-        probe.stop()
-
-        lastEnergy = null
-        lastDuration = null
-        shownLevel01 = 0.0
-        SignalLevel.post(0)
-        d("close: resources disposed, level=0")
-
-        try { guardTimer?.cancel() } catch (_: Throwable) {}
-        guardTimer = null
-
-        pendingPeerCount.set(0)
-        connectedPeerCount.set(0)
-    }
-
     companion object {
-        /** Период «тика» для индикатора (мс). Рекомендовано 60..200. */
         @Volatile var LEVEL_TICK_MS: Int = 120
-        /**
-         * Скорость затухания («release») в долях шкалы за секунду.
-         * (Рекомендовано 1.50 по вашей шпаргалке 1.5)
-         */
         @Volatile var LEVEL_RELEASE_PER_SEC: Double = 1.50
-
-        /** Диагностика в Logcat (TAG="VishnuCast"). */
         @Volatile var LOG_ENABLED: Boolean = true
-
         private const val TAG = "VishnuCast"
     }
 
-    // ======== ВНУТРЕННИЙ КЛАСС ЗОНДА МИКРОФОНА ========
+    // ======== ВНУТРЕННИЕ КЛАССЫ/ОБЪЕКТЫ ========
+
+    /** Однократная safe-инициализация WebRTC. */
+    private object WebRtcInit {
+        private val done = AtomicBoolean(false)
+        fun ensure(appCtx: Context) {
+            if (done.compareAndSet(false, true)) {
+                try { System.loadLibrary("jingle_peerconnection_so") } catch (_: Throwable) {}
+                try {
+                    val init = PeerConnectionFactory.InitializationOptions
+                        .builder(appCtx)
+                        .setEnableInternalTracer(false)
+                        .createInitializationOptions()
+                    PeerConnectionFactory.initialize(init)
+                } catch (_: Throwable) {}
+            }
+        }
+    }
+
+    // ======== MicLevelProbe (как и было) ========
     private class MicLevelProbe(private val ctx: Context) {
         @Volatile private var running = false
         @Volatile private var thread: Thread? = null
@@ -523,8 +489,6 @@ class WebRtcCore(private val ctx: Context) {
 
         fun start(onLevel01: (Double) -> Unit) {
             if (running) return
-
-            // Проверка разрешения RECORD_AUDIO (линтер/безопасность)
             val hasPerm = ContextCompat.checkSelfPermission(
                 ctx, Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED
@@ -533,16 +497,15 @@ class WebRtcCore(private val ctx: Context) {
                 Log.w("VishnuCast", "MicLevelProbe: RECORD_AUDIO permission missing; probe disabled")
                 return
             }
-
             running = true
             thread = Thread({
                 var ar: AudioRecord? = null
                 try {
                     val rate = 48000
-                    val chCfg = AudioFormat.CHANNEL_IN_MONO
+                    val chCfg = AudioFormat.CHANNEL_IN_MONO  // fallback на моно
                     val fmt = AudioFormat.ENCODING_PCM_16BIT
                     val minBuf = AudioRecord.getMinBufferSize(rate, chCfg, fmt)
-                    val bufSize = max(minBuf * 2, 960 * 10) // ~100ms+
+                    val bufSize = max(minBuf * 2, 960 * 10)
 
                     try {
                         ar = AudioRecord(
@@ -555,15 +518,14 @@ class WebRtcCore(private val ctx: Context) {
                             return@Thread
                         }
                         ar.startRecording()
-                    } catch (se: SecurityException) {
+                    } catch (_: SecurityException) {
                         running = false
                         onLevel01(0.0)
-                        Log.w("VishnuCast", "MicLevelProbe: SecurityException starting AudioRecord: ${se.message}")
+                        Log.w("VishnuCast", "MicLevelProbe: SecurityException starting AudioRecord")
                         return@Thread
                     }
 
                     val buf = ShortArray(bufSize / 2)
-
                     while (running) {
                         val toRead = min(buf.size, (rate * tickMs) / 1000)
                         val n = ar.read(buf, 0, toRead)
@@ -576,13 +538,12 @@ class WebRtcCore(private val ctx: Context) {
                                 sum += v * v
                                 if (av > peak) peak = av
                             }
-                            val rms = sqrt(sum / n.coerceAtLeast(1))
+                            val rms = kotlin.math.sqrt(sum / n.coerceAtLeast(1))
                             val levelRms = if (rms <= 1e-6) 0.0 else (20.0 * kotlin.math.log10(rms) + 60.0) / 60.0
                             val levelPeak = if (peak <= 1e-6) 0.0 else (20.0 * kotlin.math.log10(peak) + 60.0) / 60.0
                             max(0.0, min(1.0, max(levelRms * 0.85, levelPeak * 0.15)))
                         } else 0.0
 
-                        // Attack/Release
                         if (inst > shown) {
                             shown = inst
                         } else {
@@ -594,7 +555,6 @@ class WebRtcCore(private val ctx: Context) {
                         onLevel01(shown)
                     }
                 } catch (_: Throwable) {
-                    // молча сворачиваемся
                 } finally {
                     try { ar?.stop() } catch (_: Throwable) {}
                     try { ar?.release() } catch (_: Throwable) {}

@@ -51,13 +51,12 @@ class PeerManager(private val core: WebRtcCore) {
     /** Клиент отвалился или просит закрыть соединение. */
     fun closePeer(clientId: String) {
         val ps = peers.remove(clientId) ?: return
-        try { ps.pc.close() } catch (_: Throwable) {}
+        try { ps.pc.dispose() } catch (_: Throwable) {}
     }
 
-    /** Закрыть все PC (например при остановке сервиса). */
     fun closeAll() {
         for ((id, ps) in peers) {
-            try { ps.pc.close() } catch (_: Throwable) {}
+            try { ps.pc.dispose() } catch (_: Throwable) {}
         }
         peers.clear()
     }
