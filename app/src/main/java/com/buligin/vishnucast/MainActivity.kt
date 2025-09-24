@@ -128,8 +128,23 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
         // Гарантированно поднимаем сервисы при открытии окна (и после «Выход» тоже)
         CastService.ensureStarted(applicationContext)
+
+        // ⬇️ запрос нотификаций на Android 13+
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(
+                exitReceiver,
+                IntentFilter(CastService.ACTION_EXIT_APP),
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(exitReceiver, IntentFilter(CastService.ACTION_EXIT_APP))
+        }
+
+
 
         findViewById<SwipeRefreshLayout?>(R.id.swipeRefresh)?.let { srl ->
             srl.setOnRefreshListener {

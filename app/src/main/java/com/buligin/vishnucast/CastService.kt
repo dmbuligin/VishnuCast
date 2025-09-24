@@ -52,9 +52,9 @@ class CastService : Service() {
             }
 
             ACTION_EXIT -> {
-                // Выход: глушим, останавливаем и говорим активити закрыться
                 applyMute(true)
                 sendBroadcast(Intent(ACTION_EXIT_APP))
+                try { stopForeground(true) } catch (_: Throwable) {}
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -142,7 +142,7 @@ class CastService : Service() {
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (nm.getNotificationChannel(CHANNEL_ID) == null) {
-                val ch = NotificationChannel(CHANNEL_ID, "VishnuCast", NotificationManager.IMPORTANCE_LOW).apply {
+                val ch = NotificationChannel(CHANNEL_ID, "VishnuCast", NotificationManager.IMPORTANCE_DEFAULT).apply {
                     description = "VishnuCast status"
                     setShowBadge(false)
                     enableLights(false)
