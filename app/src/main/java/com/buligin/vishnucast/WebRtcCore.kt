@@ -24,14 +24,13 @@ import androidx.core.content.ContextCompat
 
 class WebRtcCore(private val ctx: Context) {
 
+    private val pendingPeerCount = AtomicInteger(0)
     private var guardTimer: Timer? = null
-
     private val egl = EglBase.create()
     private val adm: JavaAudioDeviceModule
     private val factory: PeerConnectionFactory
     private val audioSource: AudioSource
     private val audioTrack: AudioTrack
-
     private val connectedPeerCount = AtomicInteger(0)
     private val muted = AtomicBoolean(true)
 
@@ -62,8 +61,10 @@ class WebRtcCore(private val ctx: Context) {
         val clients = connectedPeerCount.get()
         val probeRunning = probe.isRunning()
         val statsActive = (statsPc != null && statsTimer != null)
+        val pending = pendingPeerCount.get()
+        val hasActiveOrPending = (clients + pending) > 0
 
-        // Мьют → всё выключить.
+// Мьют → всё выключить.
         if (isMuted) {
             if (probeRunning) { probe.stop(); d("guard: stopped probe (muted)") }
             if (statsActive) {
@@ -72,8 +73,39 @@ class WebRtcCore(private val ctx: Context) {
                 statsPc = null
                 d("guard: stopped stats (muted)")
             }
+            // heartbeat
+            d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
             return
         }
+
+        if (hasActiveOrPending) {
+            // Идёт подключение ИЛИ есть клиенты → зонд не нужен.
+            if (probeRunning) { probe.stop(); d("guard: stopped probe (active/pending)") }
+            // Stats включаем только если уже есть клиенты и есть pc
+            if (clients > 0 && !statsActive && statsPc != null) {
+                restartStatsTimer()
+                d("guard: restarted stats (clients>0)")
+            }
+        } else {
+            // Нет клиентов и нет ожидания → должен работать зонд, stats — нет.
+            if (statsActive) {
+                try { statsTimer?.cancel() } catch (_: Throwable) {}
+                statsTimer = null
+                statsPc = null
+                d("guard: stopped stats (no clients)")
+            }
+            if (!probeRunning) {
+                probe.setRelease(LEVEL_RELEASE_PER_SEC)
+                probe.setTickMs(LEVEL_TICK_MS)
+                probe.start { level01 -> onExternalLevel(level01) }
+                d("guard: started probe (no clients)")
+            }
+        }
+
+// heartbeat
+        d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
+
+
 
         if (clients > 0) {
             // Должны работать stats; зонд — нет.
@@ -208,39 +240,50 @@ class WebRtcCore(private val ctx: Context) {
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) { /* no-op */ }
 
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+
                 when (state) {
                     PeerConnection.IceConnectionState.CONNECTED -> {
+                        // Подключение состоялось
+                        pendingPeerCount.updateAndGet { n -> if (n > 0) n - 1 else 0 }
                         val n = connectedPeerCount.incrementAndGet()
                         ClientCount.post(n)
-                        // Клиент есть → выключаем зонд, переходим на stats
-                        probe.stop()
+
+                        // Включаем stats на реальном PC (теперь безопасно)
                         statsPc = createdPc
                         lastEnergy = null; lastDuration = null
                         restartStatsTimer()
-                        d("PC CONNECTED: clients=$n, probe stop, statsPc=real")
+
+                        d("PC CONNECTED: clients=$n, pending=${pendingPeerCount.get()} → stats=ON")
                     }
                     PeerConnection.IceConnectionState.CLOSED,
                     PeerConnection.IceConnectionState.FAILED,
                     PeerConnection.IceConnectionState.DISCONNECTED -> {
-                        val n = connectedPeerCount.decrementAndGet().coerceAtLeast(0)
-                        ClientCount.post(n)
-                        if (n == 0) {
-                            // Клиентов нет → отключаем stats и включаем зонд (если не mute)
-                            try { statsTimer?.cancel() } catch (_: Throwable) {}
-                            statsTimer = null
-                            statsPc = null
-                            lastEnergy = null; lastDuration = null
-                            if (!muted.get()) {
-                                probe.setRelease(LEVEL_RELEASE_PER_SEC)
-                                probe.setTickMs(LEVEL_TICK_MS)
-                                probe.start { level01 -> onExternalLevel(level01) }
-                                d("PC DISCONNECT: no clients, probe start")
+                        // Отключение: если это был «ожидающий» PC, уменьшим pending,
+                        // иначе уменьшать будем клиентов.
+                        if (connectedPeerCount.get() > 0) {
+                            val n = connectedPeerCount.decrementAndGet().coerceAtLeast(0)
+                            ClientCount.post(n)
+                            if (n == 0) {
+                                try { statsTimer?.cancel() } catch (_: Throwable) {}
+                                statsTimer = null
+                                statsPc = null
+                                lastEnergy = null; lastDuration = null
+                                d("PC $state: clients=0 → stats=OFF")
+                            } else {
+                                d("PC $state: clients=$n → stats=KEEP")
                             }
+                        } else {
+                            // Не было клиентов — значит, рвался pending PC
+                            pendingPeerCount.updateAndGet { n -> if (n > 0) n - 1 else 0 }
+                            d("PC $state: pending now ${pendingPeerCount.get()}")
                         }
                     }
-                    else -> { /* no-op */ }
+                    else -> { /* no-op for NEW/CHECKING/COMPLETED */ }
                 }
+
+
             }
+
 
             override fun onStandardizedIceConnectionChange(newState: PeerConnection.IceConnectionState?) {}
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {}
@@ -263,13 +306,13 @@ class WebRtcCore(private val ctx: Context) {
         val sender = pc.addTrack(audioTrack, listOf("vishnu_audio_stream"))
         d("createPeerConnection: addTrack sender=${sender != null}")
 
-        // Переходим на stats; зонд на всякий случай стопаем
-        probe.stop()
-        statsPc = pc
-        restartStatsTimer()
-        d("createPeerConnection: statsPc switched to newly created PC, probe stop")
+// Отмечаем «ожидаем подключение». Stats включим только на CONNECTED.
+        pendingPeerCount.incrementAndGet()
+        statsPc = pc  // просто помним актуальный pc; таймер пока НЕ запускаем
+        d("createPeerConnection: pending += 1; waiting CONNECTED to start stats")
 
         return pc
+
     }
 
     /** Перегрузка под PeerManager: применяем удалённый SDP и дергаем onSet() при успехе. */
@@ -448,8 +491,8 @@ class WebRtcCore(private val ctx: Context) {
         try { audioSource.dispose() } catch (_: Throwable) {}
         try { factory.dispose() } catch (_: Throwable) {}
         try { egl.release() } catch (_: Throwable) {}
-
         try { statsTimer?.cancel() } catch (_: Throwable) {}
+
         statsTimer = null
         statsPc = null
 
@@ -463,6 +506,12 @@ class WebRtcCore(private val ctx: Context) {
 
         try { guardTimer?.cancel() } catch (_: Throwable) {}
         guardTimer = null
+
+        try { guardTimer?.cancel() } catch (_: Throwable) {}
+        guardTimer = null
+        pendingPeerCount.set(0)
+        connectedPeerCount.set(0)
+
 
     }
 
