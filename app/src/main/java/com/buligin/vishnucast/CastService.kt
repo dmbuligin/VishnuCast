@@ -3,6 +3,7 @@ package com.buligin.vishnucast
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -15,13 +16,14 @@ class CastService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannelIfNeeded()
-        startForeground(NOTIF_ID, buildRunningNotification())
+
+        // На старте сервиса — FGS с типом DATA_SYNC (Android 14 требует тип)
+        startAsForeground(withMicType = false)
 
         // 1) Поднять HTTP/WS сервер немедленно
         startHttpWsIfNeeded()
 
-        // 2) Гарантировать инициализацию WebRTC core и включить "тишину"
-        //    + сохранить это в префы как текущее состояние.
+        // 2) Инициализировать WebRTC core и включить "тишину" (mute=true), сохранить флаг
         applyMute(true)
 
         isRunning = true
@@ -30,14 +32,25 @@ class CastService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> startHttpWsIfNeeded()
+
             ACTION_STOP -> {
-                // старый "стоп" — трактуем как выход для консистентности
+                // трактуем как выход для консистентности
                 sendBroadcast(Intent(ACTION_EXIT_APP))
                 stopSelf()
                 return START_NOT_STICKY
             }
-            ACTION_MUTE -> applyMute(true)
-            ACTION_UNMUTE -> applyMute(false)
+
+            ACTION_MUTE -> {
+                // просто глушим микрофон
+                applyMute(true)
+            }
+
+            ACTION_UNMUTE -> {
+                // Перед открытием микрофона — перевзводим FGS с типом MICROPHONE.
+                startAsForeground(withMicType = true)
+                applyMute(false)
+            }
+
             ACTION_EXIT -> {
                 // Выход: глушим, останавливаем и говорим активити закрыться
                 applyMute(true)
@@ -49,10 +62,7 @@ class CastService : Service() {
         return START_NOT_STICKY
     }
 
-
-
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Если пользователь смахнул приложение — сервис сворачиваем
         stopSelf()
         super.onTaskRemoved(rootIntent)
     }
@@ -67,31 +77,40 @@ class CastService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // --- HTTP/WS ---
+    // --- Вспомогательная обёртка вокруг startForeground ---
+    private fun startAsForeground(withMicType: Boolean) {
+        val notif = buildRunningNotification()
+        if (Build.VERSION.SDK_INT >= 29) {
+            val type = if (withMicType)
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            else
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            startForeground(NOTIF_ID, notif, type)
+        } else {
+            startForeground(NOTIF_ID, notif)
+        }
+    }
 
+    // --- HTTP/WS ---
     private fun startHttpWsIfNeeded() {
         if (server != null) return
         val sp = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val port = sp.getInt(KEY_PORT, 8080).coerceIn(1, 65535)
         server = VishnuServer(applicationContext, port).also {
-            // Таймаут чтения сокета — как в текущей логике; daemon=false
             it.launch(120_000, false)
         }
         updateNotification()
     }
 
     // --- Mute state orchestration ---
-
     private fun applyMute(muted: Boolean) {
         try { WebRtcCoreHolder.get(applicationContext).setMuted(muted) } catch (_: Throwable) {}
-        // сохраняем флаг, чтобы активити после поворота экрана знала актуальное состояние
         getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_MUTED, muted).apply()
         updateNotification()
     }
 
     // --- Notification ---
-
     private fun buildRunningNotification(): Notification {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -113,7 +132,6 @@ class CastService : Service() {
             .addAction(0, getString(R.string.action_exit), piExit)
             .build()
     }
-
 
     private fun updateNotification() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -142,9 +160,7 @@ class CastService : Service() {
     }
 
     companion object {
-
         const val ACTION_EXIT_APP = "com.buligin.vishnucast.action.EXIT_APP"
-
         const val ACTION_EXIT = "com.buligin.vishnucast.action.EXIT"
 
         @Volatile var isRunning: Boolean = false
@@ -161,7 +177,6 @@ class CastService : Service() {
         const val KEY_PORT = "server_port"
         const val KEY_MUTED = "is_muted"
 
-        /** Вспомогательная функция для UI: прочитать сохранённый mute-флаг. */
         fun getSavedMute(ctx: Context): Boolean =
             ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MUTED, true)
 

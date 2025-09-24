@@ -50,6 +50,8 @@ import androidx.work.WorkManager
 import android.widget.Button
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import android.view.HapticFeedbackConstants
+import android.content.IntentFilter
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -126,7 +128,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-// Гарантированно поднимаем сервисы при открытии окна (и после «Выход» тоже)
+        // Гарантированно поднимаем сервисы при открытии окна (и после «Выход» тоже)
         CastService.ensureStarted(applicationContext)
 
         findViewById<SwipeRefreshLayout?>(R.id.swipeRefresh)?.let { srl ->
@@ -210,11 +212,19 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
 
-        registerReceiver(exitReceiver, android.content.IntentFilter(CastService.ACTION_EXIT_APP))
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(
+                exitReceiver,
+                android.content.IntentFilter(CastService.ACTION_EXIT_APP),
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(exitReceiver, android.content.IntentFilter(CastService.ACTION_EXIT_APP))
+        }
+
         // Всегда подтягиваем истину из сервиса — вдруг активити пересоздалась
         syncUiFromService()
-
-
     }
 
     override fun onStop() {
@@ -528,8 +538,4 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
-
-
-
 }

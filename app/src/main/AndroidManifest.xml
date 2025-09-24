@@ -10,49 +10,53 @@
     <!-- МИКРОФОН / FOREGROUND SERVICE -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <!-- Типы FGS на Android 14 (targetSdk 34) -->
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"
         tools:targetApi="34" />
     <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"
+        tools:targetApi="34" />
+
+    <!-- Уведомления (Android 13+) -->
+    <uses-permission
         android:name="android.permission.POST_NOTIFICATIONS"
         tools:targetApi="33" />
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-
 
     <application
-        android:name=".App"
         android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:localeConfig="@xml/locales_config"
+        android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+        android:theme="@style/Theme.VishnuCast"
+        tools:targetApi="34">
 
         <activity
             android:name=".AboutActivity"
-            android:exported="false"
-            android:parentActivityName=".MainActivity" />
+            android:exported="false" />
 
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false" />
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|uiMode"
+            android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".SettingsActivity"
-            android:exported="false"
-            android:parentActivityName=".MainActivity" />
-
+        <!-- ВАЖНО: объявляем оба типа, чтобы можно было стартовать с dataSync и затем переключать на microphone -->
         <service
             android:name=".CastService"
             android:exported="false"
-            android:foregroundServiceType="microphone" />
+            android:foregroundServiceType="dataSync|microphone" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -63,7 +67,6 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/filepaths" />
         </provider>
-
 
     </application>
 </manifest>
