@@ -20,10 +20,10 @@ class CastService : Service() {
         // На старте сервиса — FGS с типом DATA_SYNC (Android 14 требует тип)
         startAsForeground(withMicType = false)
 
-        // 1) Поднять HTTP/WS сервер немедленно
+        // Поднять HTTP/WS сразу
         startHttpWsIfNeeded()
 
-        // 2) Инициализировать WebRTC core и включить "тишину" (mute=true), сохранить флаг
+        // Mute по умолчанию
         applyMute(true)
 
         isRunning = true
@@ -34,32 +34,38 @@ class CastService : Service() {
             ACTION_START -> startHttpWsIfNeeded()
 
             ACTION_STOP -> {
-                // трактуем как выход для консистентности
-                sendBroadcast(Intent(ACTION_EXIT_APP))
-                stopSelf()
+                performExit()
                 return START_NOT_STICKY
             }
 
             ACTION_MUTE -> {
-                // просто глушим микрофон
                 applyMute(true)
             }
 
             ACTION_UNMUTE -> {
-                // Перед открытием микрофона — перевзводим FGS с типом MICROPHONE.
+                // Перед открытием микрофона — перевзводим FGS с типом MICROPHONE
                 startAsForeground(withMicType = true)
                 applyMute(false)
             }
 
             ACTION_EXIT -> {
-                applyMute(true)
-                sendBroadcast(Intent(ACTION_EXIT_APP))
-                try { stopForeground(true) } catch (_: Throwable) {}
-                stopSelf()
+                performExit()
                 return START_NOT_STICKY
             }
         }
         return START_NOT_STICKY
+    }
+
+    private fun performExit() {
+        // 1) Глушим микрофон
+        applyMute(true)
+
+        // 2) Сообщаем Activity закрыться
+        try { sendBroadcast(Intent(ACTION_EXIT_APP)) } catch (_: Throwable) {}
+
+        // 3) Снимаем FGS-уведомление и останавливаем сервис
+        try { stopForeground(true) } catch (_: Throwable) {}
+        stopSelf()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -77,7 +83,7 @@ class CastService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // --- Вспомогательная обёртка вокруг startForeground ---
+    // --- FGS helper ---
     private fun startAsForeground(withMicType: Boolean) {
         val notif = buildRunningNotification()
         if (Build.VERSION.SDK_INT >= 29) {
@@ -102,7 +108,7 @@ class CastService : Service() {
         updateNotification()
     }
 
-    // --- Mute state orchestration ---
+    // --- Mute state ---
     private fun applyMute(muted: Boolean) {
         try { WebRtcCoreHolder.get(applicationContext).setMuted(muted) } catch (_: Throwable) {}
         getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -117,6 +123,7 @@ class CastService : Service() {
         }
         val piOpen = PendingIntent.getActivity(this, 0, openIntent, pendingFlags())
 
+        // Кнопка "Выход" — запускает действие сервиса ACTION_EXIT
         val exitIntent = Intent(this, CastService::class.java).setAction(ACTION_EXIT)
         val piExit = PendingIntent.getService(this, 2, exitIntent, pendingFlags())
 
@@ -142,7 +149,9 @@ class CastService : Service() {
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (nm.getNotificationChannel(CHANNEL_ID) == null) {
-                val ch = NotificationChannel(CHANNEL_ID, "VishnuCast", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                val ch = NotificationChannel(
+                    CHANNEL_ID, "VishnuCast", NotificationManager.IMPORTANCE_DEFAULT
+                ).apply {
                     description = "VishnuCast status"
                     setShowBadge(false)
                     enableLights(false)
