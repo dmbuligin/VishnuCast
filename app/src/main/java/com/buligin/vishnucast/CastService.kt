@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 class CastService : Service() {
 
     private var server: VishnuServer? = null
+    private var isFgShown: Boolean = false // флаг: уведомление реально запущено через startForeground
 
     override fun onCreate() {
         super.onCreate()
@@ -62,6 +63,7 @@ class CastService : Service() {
 
         // 2) Снимаем FGS-уведомление и останавливаем сервис
         try { stopForeground(true) } catch (_: Throwable) {}
+        isFgShown = false
         stopSelf()
     }
 
@@ -92,6 +94,7 @@ class CastService : Service() {
         } else {
             startForeground(NOTIF_ID, notif)
         }
+        isFgShown = true
     }
 
     // --- HTTP/WS ---
@@ -130,17 +133,28 @@ class CastService : Service() {
         val muted = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MUTED, true)
         val text = if (muted) getString(R.string.cast_stopped) else getString(R.string.cast_running)
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val b = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setContentIntent(piOpen)
-            .setOngoing(true)
+            .setOngoing(true) // делает уведомление несмахиваемым
+            .setAutoCancel(false)
+            .setCategory(Notification.CATEGORY_SERVICE)
             .addAction(0, getString(R.string.action_exit), piExit)
-            .build()
+
+        // Сделать показ foreground-уведомления немедленным (API 31+, совместимо через compat)
+        b.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+
+        val notif = b.build()
+        // дубль страховки от некоторого OEM: NO_CLEAR
+        notif.flags = notif.flags or Notification.FLAG_NO_CLEAR or Notification.FLAG_ONGOING_EVENT
+        return notif
     }
 
     private fun updateNotification() {
+        // Обновляем только еслиForeground реально показан; иначе избавимся от "Cannot find enqueued record..."
+        if (!isFgShown) return
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIF_ID, buildRunningNotification())
     }
@@ -156,6 +170,7 @@ class CastService : Service() {
                     setShowBadge(false)
                     enableLights(false)
                     enableVibration(false)
+                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 }
                 nm.createNotificationChannel(ch)
             }
