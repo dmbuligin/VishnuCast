@@ -21,7 +21,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
@@ -29,7 +28,6 @@ import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.ProgressBar
-//import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.view.ViewCompat
@@ -46,12 +44,11 @@ import android.content.Context
 import android.view.View
 import android.net.wifi.WifiManager
 import android.net.Uri
-import androidx.work.WorkManager
-import android.widget.Button
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import android.view.HapticFeedbackConstants
+import android.content.BroadcastReceiver
 import android.content.IntentFilter
-
+import android.widget.Button
 
 class MainActivity : AppCompatActivity() {
 
@@ -61,30 +58,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var tvNetBadge: TextView
-    private var netMon: NetworkMonitor? = null
     private lateinit var arrowHint: HintArrowView
     private lateinit var tvStatus: TextView
     private lateinit var tvHint: TextView
     private lateinit var tvClients: TextView
     private lateinit var ivQr: ImageView
-    //private lateinit var btnToggle: SeekBar
     private lateinit var btnToggle: Button
     private lateinit var levelBar: ProgressBar
     private lateinit var sliderContainer: FrameLayout
 
-    // Foreground-стрелка
     private var fgArrow: Drawable? = null
-    //private var fgAnim: ValueAnimator? = null
-
-    // 👉 теперь трактуем isRunning как «микрофон включен» (unmuted)
     private val isRunning = AtomicBoolean(false)
     private var lastUrl: String? = null
-    private var userIsTracking = false
-
-    // Отложенное включение микрофона после выдачи разрешения
     private var pendingUnmute = false
 
-    // Аудио-индикация
+    // ==== Аудио-индикация входных устройств ====
     private lateinit var audioManager: AudioManager
     private val audioDeviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { updateInputBadge() }
@@ -107,48 +95,41 @@ class MainActivity : AppCompatActivity() {
         TextViewCompat.setCompoundDrawableTintList(tvStatus, ColorStateList.valueOf(Color.parseColor("#6B7280")))
     }
 
+    // ===== Runtime permissions =====
     private val requestRecordAudio =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (!granted) {
                 Toast.makeText(this, getString(R.string.permission_denied), Toast.LENGTH_SHORT).show()
                 pendingUnmute = false
-                // оставляем UI как есть
-            } else {
-                // если пользователь просил включить микрофон — включаем
-                if (pendingUnmute) {
-                    setMicEnabled(true)
-                    pendingUnmute = false
-                }
+            } else if (pendingUnmute) {
+                setMicEnabled(true)
+                pendingUnmute = false
             }
         }
 
-    // Уведомления больше не требуем здесь — сервис уже живёт сам по себе
-    // private val requestPostNotifications = ...
+    private val requestPostNotifications =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
 
+    // ===== Lifecycle =====
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Гарантированно поднимаем сервисы при открытии окна (и после «Выход» тоже)
+        // Поднимаем сервисы при старте окна
         CastService.ensureStarted(applicationContext)
 
-        // ⬇️ запрос нотификаций на Android 13+
+        // Android 13+ — запрос на показ foreground-уведомления (без него шторка скрыта)
         if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(
-                exitReceiver,
-                IntentFilter(CastService.ACTION_EXIT_APP),
-                Context.RECEIVER_NOT_EXPORTED
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(exitReceiver, IntentFilter(CastService.ACTION_EXIT_APP))
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPostNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
-
-
 
         findViewById<SwipeRefreshLayout?>(R.id.swipeRefresh)?.let { srl ->
             srl.setOnRefreshListener {
-                // лёгкая вибра (необязательно)
                 try { srl.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) } catch (_: Throwable) {}
                 refreshNetworkUi()
                 srl.isRefreshing = false
@@ -175,11 +156,10 @@ class MainActivity : AppCompatActivity() {
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         updateInputBadge()
 
-        // === КНОПКА: долгий тап → mute/unmute ===
+        // Долгий тап — (un)mute
         btnToggle.setOnLongClickListener {
             try { it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS) } catch (_: Throwable) {}
-            val wantEnable = !isRunning.get() // если сейчас «тихо», хотим включить микрофон
-
+            val wantEnable = !isRunning.get()
             if (wantEnable) {
                 val micGranted = ContextCompat.checkSelfPermission(
                     this, Manifest.permission.RECORD_AUDIO
@@ -190,21 +170,17 @@ class MainActivity : AppCompatActivity() {
                     return@setOnLongClickListener true
                 }
             }
-
             setMicEnabled(wantEnable)
             true
         }
-
-        // Короткий тап — подсказка про удержание
+        // Короткий тап — подсказка
         btnToggle.setOnClickListener {
             Toast.makeText(this, getString(R.string.hold_to_toggle), Toast.LENGTH_SHORT).show()
         }
 
-        // После измерения контейнера — синхронизируем состояние
         sliderContainer.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
                 sliderContainer.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                // По умолчанию считаем «тихо» (микрофон выкл)
                 syncUiFromService()
             }
         })
@@ -220,25 +196,24 @@ class MainActivity : AppCompatActivity() {
         updateClientsCount(0)
 
         UpdateCheckWorker.ensureScheduled(this)
-        intent?.let { handleUpdateIntent(it) }
     }
 
     override fun onStart() {
         super.onStart()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
 
+        // Регистрируем ресивер EXIT_APP ТОЛЬКО здесь
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(
                 exitReceiver,
-                android.content.IntentFilter(CastService.ACTION_EXIT_APP),
+                IntentFilter(CastService.ACTION_EXIT_APP),
                 Context.RECEIVER_NOT_EXPORTED
             )
         } else {
             @Suppress("DEPRECATION")
-            registerReceiver(exitReceiver, android.content.IntentFilter(CastService.ACTION_EXIT_APP))
+            registerReceiver(exitReceiver, IntentFilter(CastService.ACTION_EXIT_APP))
         }
 
-        // Всегда подтягиваем истину из сервиса — вдруг активити пересоздалась
         syncUiFromService()
     }
 
@@ -250,6 +225,7 @@ class MainActivity : AppCompatActivity() {
         hideArrowHint()
     }
 
+    // ===== Menu =====
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         val inflater: MenuInflater = menuInflater
         inflater.inflate(R.menu.main_menu, menu)
@@ -258,14 +234,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
         R.id.action_exit -> {
-            // корректный выход: сервис сообщит активити закрыться
+            // Просим сервис выйти (он пошлёт ACTION_EXIT_APP → мы закроем Activity)
             val exit = Intent(this, CastService::class.java).setAction(CastService.ACTION_EXIT)
-            ContextCompat.startForegroundService(this, exit)
+            try {
+                if (Build.VERSION.SDK_INT >= 26) startForegroundService(exit) else startService(exit)
+            } catch (_: Throwable) {}
             true
         }
-        R.id.menu_settings -> {
-            startActivity(Intent(this, SettingsActivity::class.java)); true
-        }
+        R.id.menu_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
         R.id.action_language -> { showLanguagePicker(); true }
         R.id.action_check_updates -> { checkForUpdates(); true }
         R.id.action_about -> { startActivity(Intent(this, AboutActivity::class.java)); true }
@@ -273,9 +249,8 @@ class MainActivity : AppCompatActivity() {
         else -> super.onOptionsItemSelected(item)
     }
 
-    // --- Управление микрофоном (mute/unmute) через сервис ---
+    // ===== Mic control =====
     private fun setMicEnabled(enable: Boolean) {
-        // шлём интент в CastService (он уже запущен автостартом)
         val action = if (enable) CastService.ACTION_UNMUTE else CastService.ACTION_MUTE
         val intent = Intent(this, CastService::class.java).setAction(action)
         try {
@@ -284,20 +259,6 @@ class MainActivity : AppCompatActivity() {
 
         updateUiRunning(enable)
         try { btnToggle.performHapticFeedback(HapticFeedbackConstants.CONFIRM) } catch (_: Throwable) {}
-    }
-
-    // --- УСТАРЕВШЕ: старт/стоп сервиса не используем как действие кнопки, оставляю для совместимости меню/тестов ---
-    private fun startCastService() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            ContextCompat.startForegroundService(this, Intent(this, CastService::class.java))
-        } else {
-            startService(Intent(this, CastService::class.java))
-        }
-        // НЕ трогаем isRunning тут, это состояние микрофона
-    }
-    private fun stopCastService() {
-        stopService(Intent(this, CastService::class.java))
-        // isRunning не меняем — это переключает только ACTION_MUTE/UNMUTE
     }
 
     private fun updateUiRunning(running: Boolean) {
@@ -314,14 +275,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hideArrowHint() {
-        //fgAnim?.cancel()
-        //fgAnim = null
         fgArrow?.alpha = 0
         sliderContainer.foreground = null
         fgArrow = null
     }
 
-    // -----------------------------------------------
+    // ===== Helpers/UI =====
     private fun updateClientsCount(count: Int) {
         val isRu = AppCompatDelegate.getApplicationLocales()
             ?.toLanguageTags()
@@ -343,20 +302,6 @@ class MainActivity : AppCompatActivity() {
                     LocaleListCompat.forLanguageTags(if (chosen == "ru") "ru" else "en")
                 )
                 dialog.dismiss(); recreate()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun showNotificationsDeniedDialog() {
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.app_name))
-            .setMessage("Для фоновой работы требуется разрешение на уведомления.\nОткрыть настройки приложения?")
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                }
-                startActivity(intent)
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -437,13 +382,11 @@ class MainActivity : AppCompatActivity() {
         val active = cm.activeNetwork
         val caps = cm.getNetworkCapabilities(active)
 
-        // 1) По активной сети (если есть)
         if (caps != null) {
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return NetKind.ETH
             if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))     return NetKind.WIFI
         }
 
-        // 2) Fallback: по имени интерфейса
         if (ip != null) {
             try {
                 val target = java.net.InetAddress.getByName(ip)
@@ -498,7 +441,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showUpdateDialog(info: UpdateChecker.ReleaseInfo) {
-        val body = info.body.trim().take(1200) // короткий changelog
+        val body = info.body.trim().take(1200)
         val msg = getString(R.string.update_found_msg, info.versionName, body)
 
         val b = AlertDialog.Builder(this)
@@ -515,40 +458,20 @@ class MainActivity : AppCompatActivity() {
                 ApkDownloader.downloadAndInstall(this, info.downloadUrl, fn)
             }
         }
-
         b.show()
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleUpdateIntent(intent)
-    }
-
-    private fun handleUpdateIntent(i: Intent) {
-        if (i.action == UpdateProtocol.ACTION_DOWNLOAD_UPDATE) {
-            val url  = i.getStringExtra(UpdateProtocol.EXTRA_UPDATE_URL)
-            val name = i.getStringExtra(UpdateProtocol.EXTRA_UPDATE_NAME) ?: "VishnuCast-update.apk"
-            if (!url.isNullOrBlank()) {
-                ApkDownloader.downloadAndInstall(this, url, name)
-            }
-            i.action = null
-        }
     }
 
     private fun syncUiFromService() {
         val muted = CastService.getSavedMute(this)
-        updateUiRunning(!muted) // running = микрофон включён = !muted
+        updateUiRunning(!muted)
     }
 
-    private val exitReceiver = object : android.content.BroadcastReceiver() {
+    // ===== EXIT broadcast =====
+    private val exitReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == CastService.ACTION_EXIT_APP) {
-                // закрываем окно и задачу, чтобы не было «UI без сервисов»
-                try {
-                    finishAndRemoveTask()
-                } catch (_: Throwable) {
-                    finishAffinity()
-                    finish()
+                try { finishAndRemoveTask() } catch (_: Throwable) {
+                    finishAffinity(); finish()
                 }
             }
         }
