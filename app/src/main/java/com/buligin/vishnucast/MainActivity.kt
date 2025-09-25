@@ -47,6 +47,8 @@ import android.net.Uri
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import android.view.HapticFeedbackConstants
 import android.widget.Button
+import android.widget.ImageButton
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -55,7 +57,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_APP_LANG = "app_lang" // "ru" | "en"
     }
 
-    private lateinit var btnExit: Button
+    private lateinit var btnExit: ImageButton
 
     private lateinit var tvNetBadge: TextView
     private lateinit var arrowHint: HintArrowView

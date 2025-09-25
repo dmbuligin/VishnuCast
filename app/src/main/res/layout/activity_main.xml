@@ -1,208 +1,198 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+
     android:id="@+id/swipeRefresh"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/background_light">
-
-    <LinearLayout
-        android:orientation="vertical"
+    <androidx.core.widget.NestedScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="12dp">
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:background="@color/background_light">
 
-        <androidx.appcompat.widget.Toolbar
-            android:id="@+id/toolbar"
-            android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            android:background="#2563EB">
-
-            <ImageView
-                android:layout_width="wrap_content"
-                android:layout_height="match_parent"
-                android:src="@drawable/logo_toolbar"
-                android:adjustViewBounds="true"
-                android:scaleType="fitCenter" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="match_parent"
-                android:gravity="center_vertical"
-                android:text="@string/app_name"
-                android:textColor="@android:color/white"
-                android:textStyle="bold"
-                android:textSize="20sp"
-                android:paddingStart="12dp" />
-        </androidx.appcompat.widget.Toolbar>
-
-        <FrameLayout
-            android:id="@+id/sliderContainer"
-            android:layout_width="match_parent"
-            android:layout_height="64dp"
-            android:layout_marginTop="12dp"
-            android:layout_marginBottom="8dp"
-            android:layout_marginStart="24dp"
-            android:layout_marginEnd="24dp"
-            android:clipChildren="false"
-            android:clipToPadding="false">
-
-            <!-- стало -->
-            <LinearLayout
-                android:id="@+id/rowMainCtas"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:dividerPadding="0dp"
-                android:showDividers="none"
-                android:layout_marginTop="12dp">
-
-                <Button
-                    android:id="@+id/btnToggle"
-                    android:layout_width="0dp"
-                    android:layout_height="56dp"
-                    android:layout_weight="1"
-                    android:text="@string/btn_start"
-                    android:backgroundTint="#2563EB"
-                    android:textColor="@android:color/white"
-                    android:stateListAnimator="@null"
-                    android:layout_marginEnd="8dp"/>
-
-                <Button
-                    android:id="@+id/btnExit"
-                    android:layout_width="56dp"
-                    android:layout_height="56dp"
-                    android:backgroundTint="@android:color/transparent"
-                    android:foreground="?attr/selectableItemBackgroundBorderless"
-                    android:stateListAnimator="@null"
-                    android:contentDescription="@string/action_exit"
-                    android:tooltipText="@string/action_exit"
-                    android:padding="8dp"
-                    android:drawablePadding="0dp"
-                    android:insetTop="0dp"
-                    android:insetBottom="0dp"
-                    android:insetLeft="0dp"
-                    android:insetRight="0dp"
-                    android:drawableStart="@drawable/ic_power_24"
-                    android:drawableTint="#6B7280"/>
-            </LinearLayout>
-
-
-
-            <com.buligin.vishnucast.HintArrowView
-                android:id="@+id/arrowHint"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:visibility="gone"
-                android:clickable="false"
-                android:focusable="false" />
-        </FrameLayout>
-
-        <ProgressBar
-            android:id="@+id/signalLevelBar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="8dp"
-            android:layout_marginTop="10dp"
-            android:max="100"
-            android:progress="0"
-            android:progressDrawable="@drawable/signal_level_bar" />
-
-        <TextView
-            android:id="@+id/tvStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/bg_status_pill"
-            android:gravity="center"
-            android:paddingLeft="12dp"
-            android:paddingRight="12dp"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp"
-            android:text="@string/status_stopped"
-            android:textColor="#111827"
-            android:textSize="14sp" />
-
-        <!-- Карточка с подсказкой URL и бейджем сети -->
         <LinearLayout
             android:orientation="vertical"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/bg_info_card"
-            android:padding="10dp">
+            android:padding="12dp">
 
-            <!-- Ряд: URL hint + сетевой бейдж в одной строке -->
-            <LinearLayout
-                android:id="@+id/hintRow"
+            <androidx.appcompat.widget.Toolbar
+                android:id="@+id/toolbar"
+                android:layout_width="match_parent"
+                android:layout_height="?attr/actionBarSize"
+                android:background="#2563EB">
+
+                <ImageView
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:src="@drawable/logo_toolbar"
+                    android:adjustViewBounds="true"
+                    android:scaleType="fitCenter" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:gravity="center_vertical"
+                    android:text="@string/app_name"
+                    android:textColor="@android:color/white"
+                    android:textStyle="bold"
+                    android:textSize="20sp"
+                    android:paddingStart="12dp" />
+            </androidx.appcompat.widget.Toolbar>
+
+            <FrameLayout
+                android:id="@+id/sliderContainer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
+                android:layout_marginStart="24dp"
+                android:layout_marginEnd="24dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="8dp"
+                android:clipChildren="false"
+                android:clipToPadding="false">
 
-                <TextView
-                    android:id="@+id/tvHint"
-                    android:layout_width="0dp"
+                <!-- Ряд CTA: Mute/Unmute + Exit (⏻) -->
+                <LinearLayout
+                    android:id="@+id/rowMainCtas"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:textColor="#6B7280"
-                    android:textSize="14sp"
-                    android:singleLine="true"
-                    android:ellipsize="end"
-                    android:text="@string/hint_open_url" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
 
-                <TextView
-                    android:id="@+id/tvNetBadge"
-                    android:layout_width="wrap_content"
+                    <Button
+                        android:id="@+id/btnToggle"
+                        android:layout_width="0dp"
+                        android:layout_height="56dp"
+                        android:layout_weight="1"
+                        android:text="@string/btn_start"
+                        android:backgroundTint="#2563EB"
+                        android:textColor="@android:color/white"
+                        android:stateListAnimator="@null"
+                        android:layout_marginEnd="8dp" />
+
+                    <ImageButton
+                        android:id="@+id/btnExit"
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/action_exit"
+                        android:padding="12dp"
+                        app:srcCompat="@drawable/ic_power_24"
+                        app:tint="#6B7280" />
+
+
+
+                </LinearLayout>
+
+                <com.buligin.vishnucast.HintArrowView
+                    android:id="@+id/arrowHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:visibility="gone"
+                    android:clickable="false"
+                    android:focusable="false" />
+            </FrameLayout>
+
+            <ProgressBar
+                android:id="@+id/signalLevelBar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="8dp"
+                android:layout_marginTop="10dp"
+                android:max="100"
+                android:progress="0"
+                android:progressDrawable="@drawable/signal_level_bar" />
+
+            <TextView
+                android:id="@+id/tvStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_status_pill"
+                android:gravity="center"
+                android:paddingLeft="12dp"
+                android:paddingRight="12dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:text="@string/status_stopped"
+                android:textColor="#111827"
+                android:textSize="14sp" />
+
+            <!-- Карточка с подсказкой URL и бейджем сети -->
+            <LinearLayout
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_info_card"
+                android:padding="10dp">
+
+                <!-- Ряд: URL hint + сетевой бейдж -->
+                <LinearLayout
+                    android:id="@+id/hintRow"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:paddingStart="8dp"
-                    android:paddingEnd="8dp"
-                    android:paddingTop="2dp"
-                    android:paddingBottom="2dp"
-                    android:background="@drawable/bg_status_pill"
-                    android:text="@string/badge_other"
-                    android:textStyle="bold"
-                    android:textSize="12sp"
-                    android:textColor="#111827" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:baselineAligned="false">
+
+                    <TextView
+                        android:id="@+id/tvHint"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:textColor="#6B7280"
+                        android:textSize="14sp"
+                        android:singleLine="true"
+                        android:ellipsize="end"
+                        android:text="@string/hint_open_url" />
+
+                    <TextView
+                        android:id="@+id/tvNetBadge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:paddingTop="2dp"
+                        android:paddingBottom="2dp"
+                        android:background="@drawable/bg_status_pill"
+                        android:text="@string/badge_other"
+                        android:textStyle="bold"
+                        android:textSize="12sp"
+                        android:textColor="#111827" />
+                </LinearLayout>
             </LinearLayout>
 
+            <TextView
+                android:id="@+id/tvClients"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_status_pill"
+                android:gravity="center"
+                android:paddingLeft="12dp"
+                android:paddingRight="12dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:text="Connected clients: 0"
+                android:textColor="#6B7280"
+                android:textSize="14sp" />
 
+            <ImageView
+                android:id="@+id/ivQr"
+                android:layout_width="220dp"
+                android:layout_height="220dp"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="12dp"
+                android:contentDescription="@string/app_name" />
 
-
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="16dp" />
         </LinearLayout>
-
-        <TextView
-            android:id="@+id/tvClients"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:background="@drawable/bg_status_pill"
-            android:gravity="center"
-            android:paddingLeft="12dp"
-            android:paddingRight="12dp"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp"
-            android:text="Connected clients: 0"
-            android:textColor="#6B7280"
-            android:textSize="14sp" />
-
-        <ImageView
-            android:id="@+id/ivQr"
-            android:layout_width="220dp"
-            android:layout_height="220dp"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="12dp"
-            android:contentDescription="@string/app_name" />
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="16dp" />
-    </LinearLayout>
-</ScrollView>
+    </androidx.core.widget.NestedScrollView>
 </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
