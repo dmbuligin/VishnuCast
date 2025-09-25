@@ -2,23 +2,17 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <item
-        android:id="@+id/action_exit"
-        android:title="@string/action_exit"
-        android:orderInCategory="0"
-        app:showAsAction="never" />
-
 
     <item
         android:id="@+id/action_refresh"
         android:title="@string/cast_action_refresh"
         app:showAsAction="never" />
-
+    <!--
     <item
         android:id="@+id/menu_settings"
         android:title="@string/menu_settings"
         app:showAsAction="never" />
-
+    -->
     <item
         android:id="@+id/action_language"
         android:title="@string/menu_language"
@@ -33,5 +27,11 @@
     <item
         android:id="@+id/action_about"
         android:title="@string/menu_about"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_exit"
+        android:title="@string/action_exit"
+        android:orderInCategory="0"
         app:showAsAction="never" />
 </menu>
