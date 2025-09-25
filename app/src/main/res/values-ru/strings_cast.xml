@@ -11,13 +11,16 @@
     <string name="action_exit">Выход</string>
 
 
-
-
-
     <!-- Buttons -->
     <string name="btn_start">Старт трансляции</string>
     <string name="btn_stop">Стоп</string>
     <string name="hold_to_toggle">Удерживайте для старта/стопа</string>
+    <string name="exit_confirm_title">Выход</string>
+    <string name="exit_confirm_msg">Остановить трансляцию и выйти?</string>
+    <string name="exit_confirm_yes">Выйти</string>
+
+
+
 
 
     <!-- Hints -->

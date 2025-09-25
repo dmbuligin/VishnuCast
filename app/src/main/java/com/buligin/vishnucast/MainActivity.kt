@@ -55,6 +55,8 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_APP_LANG = "app_lang" // "ru" | "en"
     }
 
+    private lateinit var btnExit: Button
+
     private lateinit var tvNetBadge: TextView
     private lateinit var arrowHint: HintArrowView
     private lateinit var tvStatus: TextView
@@ -147,6 +149,19 @@ class MainActivity : AppCompatActivity() {
         sliderContainer.foreground = null
         sliderContainer.overlay.clear()
         btnToggle = findViewById(R.id.btnToggle)
+
+        btnExit = findViewById(R.id.btnExit)
+        btnExit.setOnClickListener { confirmExit() }
+        btnExit.setOnLongClickListener {
+            try { it.performHapticFeedback(HapticFeedbackConstants.CONFIRM) } catch (_: Throwable) {}
+            performExitFromUi()   // мгновенный выход по длинному тапу
+            true
+        }
+
+
+
+
+
         arrowHint = findViewById(R.id.arrowHint)
         levelBar = findViewById(R.id.signalLevelBar)
 
@@ -484,4 +499,19 @@ class MainActivity : AppCompatActivity() {
         val muted = CastService.getSavedMute(this)
         updateUiRunning(!muted)
     }
+
+    private fun confirmExit() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.exit_confirm_title)
+            .setMessage(R.string.exit_confirm_msg)
+            .setPositiveButton(R.string.exit_confirm_yes) { _, _ -> performExitFromUi() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+
+
+
+
+
 }

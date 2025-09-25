@@ -124,11 +124,11 @@ class CastService : Service() {
         val piOpen = PendingIntent.getActivity(this, 0, openIntent, pendingFlags())
 
         // Кнопка "Выход" — открывает Activity с ACTION_EXIT_NOW (без broadcast)
-        val exitIntent = Intent(this, MainActivity::class.java).apply {
-            action = ACTION_EXIT_NOW
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-        }
-        val piExit = PendingIntent.getActivity(this, 10, exitIntent, pendingFlags())
+//        val exitIntent = Intent(this, MainActivity::class.java).apply {
+//            action = ACTION_EXIT_NOW
+//            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+//        }
+//        val piExit = PendingIntent.getActivity(this, 10, exitIntent, pendingFlags())
 
         val muted = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MUTED, true)
         val text = if (muted) getString(R.string.cast_stopped) else getString(R.string.cast_running)
@@ -141,7 +141,7 @@ class CastService : Service() {
             .setOngoing(true) // делает уведомление несмахиваемым
             .setAutoCancel(false)
             .setCategory(Notification.CATEGORY_SERVICE)
-            .addAction(0, getString(R.string.action_exit), piExit)
+           // .addAction(0, getString(R.string.action_exit), piExit)
 
         // Сделать показ foreground-уведомления немедленным (API 31+, совместимо через compat)
         b.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)

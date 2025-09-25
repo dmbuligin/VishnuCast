@@ -51,14 +51,47 @@
             android:clipChildren="false"
             android:clipToPadding="false">
 
-            <Button
-                android:id="@+id/btnToggle"
+            <!-- стало -->
+            <LinearLayout
+                android:id="@+id/rowMainCtas"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:background="@drawable/bg_status_pill"
-                android:text="@string/btn_start"
-                android:textStyle="bold"
-                android:textColor="@android:color/white" />
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:dividerPadding="0dp"
+                android:showDividers="none"
+                android:layout_marginTop="12dp">
+
+                <Button
+                    android:id="@+id/btnToggle"
+                    android:layout_width="0dp"
+                    android:layout_height="56dp"
+                    android:layout_weight="1"
+                    android:text="@string/btn_start"
+                    android:backgroundTint="#2563EB"
+                    android:textColor="@android:color/white"
+                    android:stateListAnimator="@null"
+                    android:layout_marginEnd="8dp"/>
+
+                <Button
+                    android:id="@+id/btnExit"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:backgroundTint="@android:color/transparent"
+                    android:foreground="?attr/selectableItemBackgroundBorderless"
+                    android:stateListAnimator="@null"
+                    android:contentDescription="@string/action_exit"
+                    android:tooltipText="@string/action_exit"
+                    android:padding="8dp"
+                    android:drawablePadding="0dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:insetLeft="0dp"
+                    android:insetRight="0dp"
+                    android:drawableStart="@drawable/ic_power_24"
+                    android:drawableTint="#6B7280"/>
+            </LinearLayout>
+
 
 
             <com.buligin.vishnucast.HintArrowView

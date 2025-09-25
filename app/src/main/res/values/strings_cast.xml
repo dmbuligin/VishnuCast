@@ -17,6 +17,9 @@
     <string name="btn_start">Start streaming</string>
     <string name="btn_stop">Stop</string>
     <string name="hold_to_toggle">Hold to start/stop</string>
+    <string name="exit_confirm_title">Exit</string>
+    <string name="exit_confirm_msg">Stop streaming and exit?</string>
+    <string name="exit_confirm_yes">Exit</string>
 
 
     <!-- Hints -->
