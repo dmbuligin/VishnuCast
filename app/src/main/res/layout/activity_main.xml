@@ -47,8 +47,8 @@
                 android:id="@+id/sliderContainer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="24dp"
-                android:layout_marginEnd="24dp"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
                 android:layout_marginTop="12dp"
                 android:layout_marginBottom="8dp"
                 android:clipChildren="false"
@@ -72,8 +72,7 @@
                         app:layout_constraintEnd_toStartOf="@id/btnExit"
                         app:layout_constraintTop_toTopOf="parent"
                         app:layout_constraintBottom_toBottomOf="parent"
-                        app:layout_goneMarginEnd="8dp"
-                        android:layout_marginEnd="8dp" />
+                        app:layout_constraintHorizontal_bias="0.0" />
 
                     <ImageButton
                         android:id="@+id/btnExit"
@@ -85,9 +84,13 @@
                         android:scaleType="centerInside"
                         app:srcCompat="@drawable/ic_power_24"
                         app:tint="#111827"
+                        app:tintMode="src_in"
+                        app:layout_constraintStart_toEndOf="@id/btnToggle"
+                        android:layout_marginStart="8dp"
                         app:layout_constraintEnd_toEndOf="parent"
                         app:layout_constraintTop_toTopOf="parent"
                         app:layout_constraintBottom_toBottomOf="parent" />
+
                 </androidx.constraintlayout.widget.ConstraintLayout>
 
 
