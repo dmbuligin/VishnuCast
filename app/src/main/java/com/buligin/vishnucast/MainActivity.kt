@@ -260,7 +260,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
         R.id.action_exit -> { performExitFromUi(); true }
-        R.id.menu_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
+        // Настройки спрятал
+   //     R.id.menu_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
         R.id.action_language -> { showLanguagePicker(); true }
         R.id.action_check_updates -> { checkForUpdates(); true }
         R.id.action_about -> { startActivity(Intent(this, AboutActivity::class.java)); true }
