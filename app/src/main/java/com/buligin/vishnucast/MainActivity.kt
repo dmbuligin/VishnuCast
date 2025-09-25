@@ -45,9 +45,13 @@ import android.view.View
 import android.net.wifi.WifiManager
 import android.net.Uri
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import android.annotation.SuppressLint
 import android.view.HapticFeedbackConstants
 import android.widget.Button
 import android.widget.ImageButton
+import android.view.MotionEvent
+import android.view.ViewConfiguration
+
 
 
 class MainActivity : AppCompatActivity() {
@@ -113,6 +117,7 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
 
     // ===== Lifecycle =====
+    @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -192,22 +197,67 @@ class MainActivity : AppCompatActivity() {
             setMicEnabled(wantEnable)
             true
         }
-        btnToggle.setOnClickListener {
-            val wantEnable = !isRunning.get()
+        // Отупляем кнопу старт/стоп
+        // Порог "не микротапа"
+        val minPressMs = 60L
+        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
 
-            if (wantEnable) {
-                val micGranted = ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.RECORD_AUDIO
-                ) == PackageManager.PERMISSION_GRANTED
-                if (!micGranted) {
-                    pendingUnmute = true
-                    requestRecordAudio.launch(Manifest.permission.RECORD_AUDIO)
-                    return@setOnClickListener
+
+        btnToggle.setOnTouchListener { v, e ->
+            // локальные статики
+            var downTime by v.tags("downTime", 0L)
+            var downX by v.tags("downX", 0f)
+            var downY by v.tags("downY", 0f)
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downTime = System.currentTimeMillis()
+                    downX = e.x
+                    downY = e.y
+                    v.isPressed = true
+                    true
                 }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.x - downX
+                    val dy = e.y - downY
+                    if (dx*dx + dy*dy > touchSlop * touchSlop) {
+                        // палец "уехал" — отменяем тап
+                        v.isPressed = false
+                        return@setOnTouchListener true
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val held = System.currentTimeMillis() - downTime
+                    v.isPressed = false
+                    if (held >= minPressMs) {
+                        // Валидный "не-микро" тап → переключаем
+                        val wantEnable = !isRunning.get()
+                        if (wantEnable) {
+                            val micGranted = ContextCompat.checkSelfPermission(
+                                this, Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (!micGranted) {
+                                pendingUnmute = true
+                                requestRecordAudio.launch(Manifest.permission.RECORD_AUDIO)
+                                return@setOnTouchListener true
+                            }
+                        }
+                        setMicEnabled(wantEnable)
+                    } else {
+                        // слишком короткий "тычок" — игнорируем
+                        // при желании можно показать короткую подсказку один раз
+                        // Toast.makeText(this, R.string.hold_briefly, Toast.LENGTH_SHORT).show()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    v.isPressed = false
+                    true
+                }
+                else -> false
             }
-
-            setMicEnabled(wantEnable)
         }
+
 
         sliderContainer.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
@@ -270,6 +320,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ===== Exit orchestration =====
+
+    // Хитрость: хранить примитивы в view.getTag()/setTag() типобезопасно
+    private fun <T> View.tags(key: String, default: T): DelegateTag<T> = DelegateTag(this, key, default)
+
+    private class DelegateTag<T>(
+        private val v: View,
+        private val key: String,
+        private val default: T
+    ) {
+        operator fun getValue(thisRef: Any?, property: Any?): T {
+            @Suppress("UNCHECKED_CAST")
+            return (v.getTag(key.hashCode()) as? T) ?: default
+        }
+        operator fun setValue(thisRef: Any?, property: Any?, value: T) {
+            v.setTag(key.hashCode(), value)
+        }
+    }
+
+
+
+
+
+
     private fun handleExitNowIntent(i: Intent?) {
         if (i?.action == CastService.ACTION_EXIT_NOW) {
             performExitFromUi()
