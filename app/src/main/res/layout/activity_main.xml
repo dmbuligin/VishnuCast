@@ -2,7 +2,6 @@
 <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-
     android:id="@+id/swipeRefresh"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
@@ -19,6 +18,7 @@
             android:layout_height="wrap_content"
             android:padding="12dp">
 
+            <!-- Toolbar -->
             <androidx.appcompat.widget.Toolbar
                 android:id="@+id/toolbar"
                 android:layout_width="match_parent"
@@ -43,18 +43,19 @@
                     android:paddingStart="12dp" />
             </androidx.appcompat.widget.Toolbar>
 
+            <!-- Контейнер с основными CTA -->
             <FrameLayout
                 android:id="@+id/sliderContainer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:layout_marginEnd="16dp"
+                android:layout_marginStart="0dp"
+                android:layout_marginEnd="0dp"
                 android:layout_marginTop="12dp"
                 android:layout_marginBottom="8dp"
                 android:clipChildren="false"
                 android:clipToPadding="false">
 
-                <!-- Ряд CTA: Mute/Unmute + Exit (⏻) -->
+                <!-- Ряд CTA: Mute/Unmute (слева, растяжимый) + Exit (справа, квадрат) -->
                 <androidx.constraintlayout.widget.ConstraintLayout
                     android:id="@+id/rowMainCtas"
                     android:layout_width="match_parent"
@@ -72,7 +73,8 @@
                         app:layout_constraintEnd_toStartOf="@id/btnExit"
                         app:layout_constraintTop_toTopOf="parent"
                         app:layout_constraintBottom_toBottomOf="parent"
-                        app:layout_constraintHorizontal_bias="0.0" />
+                        app:layout_constraintHorizontal_bias="0.0"
+                        android:layout_marginEnd="24dp" />
 
                     <ImageButton
                         android:id="@+id/btnExit"
@@ -90,9 +92,7 @@
                         app:layout_constraintEnd_toEndOf="parent"
                         app:layout_constraintTop_toTopOf="parent"
                         app:layout_constraintBottom_toBottomOf="parent" />
-
                 </androidx.constraintlayout.widget.ConstraintLayout>
-
 
                 <com.buligin.vishnucast.HintArrowView
                     android:id="@+id/arrowHint"
@@ -103,6 +103,7 @@
                     android:focusable="false" />
             </FrameLayout>
 
+            <!-- Индикатор уровня -->
             <ProgressBar
                 android:id="@+id/signalLevelBar"
                 style="?android:attr/progressBarStyleHorizontal"
@@ -113,6 +114,7 @@
                 android:progress="0"
                 android:progressDrawable="@drawable/signal_level_bar" />
 
+            <!-- Статус -->
             <TextView
                 android:id="@+id/tvStatus"
                 android:layout_width="match_parent"
@@ -137,7 +139,6 @@
                 android:background="@drawable/bg_info_card"
                 android:padding="10dp">
 
-                <!-- Ряд: URL hint + сетевой бейдж -->
                 <LinearLayout
                     android:id="@+id/hintRow"
                     android:layout_width="match_parent"
@@ -174,6 +175,7 @@
                 </LinearLayout>
             </LinearLayout>
 
+            <!-- Счётчик клиентов -->
             <TextView
                 android:id="@+id/tvClients"
                 android:layout_width="match_parent"
@@ -189,6 +191,7 @@
                 android:textColor="#6B7280"
                 android:textSize="14sp" />
 
+            <!-- QR -->
             <ImageView
                 android:id="@+id/ivQr"
                 android:layout_width="220dp"
