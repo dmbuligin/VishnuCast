@@ -88,7 +88,6 @@
                         app:tint="#111827"
                         app:tintMode="src_in"
                         app:layout_constraintStart_toEndOf="@id/btnToggle"
-                        android:layout_marginStart="8dp"
                         app:layout_constraintEnd_toEndOf="parent"
                         app:layout_constraintTop_toTopOf="parent"
                         app:layout_constraintBottom_toBottomOf="parent" />
