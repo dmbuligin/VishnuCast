@@ -55,22 +55,24 @@
                 android:clipToPadding="false">
 
                 <!-- Ряд CTA: Mute/Unmute + Exit (⏻) -->
-                <LinearLayout
+                <androidx.constraintlayout.widget.ConstraintLayout
                     android:id="@+id/rowMainCtas"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:layout_height="wrap_content">
 
                     <Button
                         android:id="@+id/btnToggle"
                         android:layout_width="0dp"
                         android:layout_height="56dp"
-                        android:layout_weight="1"
                         android:text="@string/btn_start"
                         android:backgroundTint="#2563EB"
                         android:textColor="@android:color/white"
                         android:stateListAnimator="@null"
+                        app:layout_constraintStart_toStartOf="parent"
+                        app:layout_constraintEnd_toStartOf="@id/btnExit"
+                        app:layout_constraintTop_toTopOf="parent"
+                        app:layout_constraintBottom_toBottomOf="parent"
+                        app:layout_goneMarginEnd="8dp"
                         android:layout_marginEnd="8dp" />
 
                     <ImageButton
@@ -80,12 +82,14 @@
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:contentDescription="@string/action_exit"
                         android:padding="12dp"
+                        android:scaleType="centerInside"
                         app:srcCompat="@drawable/ic_power_24"
-                        app:tint="#6B7280" />
+                        app:tint="#111827"
+                        app:layout_constraintEnd_toEndOf="parent"
+                        app:layout_constraintTop_toTopOf="parent"
+                        app:layout_constraintBottom_toBottomOf="parent" />
+                </androidx.constraintlayout.widget.ConstraintLayout>
 
-
-
-                </LinearLayout>
 
                 <com.buligin.vishnucast.HintArrowView
                     android:id="@+id/arrowHint"
