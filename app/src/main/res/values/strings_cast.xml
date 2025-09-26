@@ -106,5 +106,15 @@
     <string name="upd_text">Tap to download &amp; install</string>
 
 
+    <string name="update_downloading">Downloading update…</string>
+    <string name="update_progress_fmt">Progress: %1$d%%</string>
+    <string name="update_ready_install">Ready to install</string>
+    <string name="update_failed_fmt">Download failed: %1$s</string>
+    <string name="install">Install</string>
+    <string name="cancel">Cancel</string>
+    <string name="update_enable_unknown_sources">Allow installation from this source</string>
+
+
+
 
 </resources>

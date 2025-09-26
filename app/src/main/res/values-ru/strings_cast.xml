@@ -103,4 +103,14 @@
     <string name="upd_text">Нажмите, чтобы скачать и установить</string>
 
 
+    <string name="update_downloading">Загрузка обновления…</string>
+    <string name="update_progress_fmt">Загрузка: %1$d%%</string>
+    <string name="update_ready_install">Готово к установке</string>
+    <string name="update_failed_fmt">Ошибка загрузки: %1$s</string>
+    <string name="install">Установить</string>
+    <string name="cancel">Отмена</string>
+    <string name="update_enable_unknown_sources">Разрешите установку из этого источника</string>
+
+
+
 </resources>
