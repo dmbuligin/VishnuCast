@@ -82,7 +82,7 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ### Credits
 
-Project by **dmbuligin** aka **Mr. Dima**, with AI collaboration.
+Project by **dmbuligin** aka **Mr. Dima**, with AI collaboration.<br>
 Created in deep respect for my Guru — [Vishnu Sharan Shukla](https://yogasanskar.ru/)
 
 ## RU
