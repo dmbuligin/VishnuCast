@@ -76,9 +76,7 @@ This project is licensed under the [MIT License](LICENSE).
 
 <p align="center"> <img src="docs/screen14.png" alt="Main screen" width="250"/> <img src="docs/screen3.png" alt="Menu" width="250"/> <img src="docs/screen2.jpg" alt="Client page" width="250"/></p>
 
-Contributing
-------------
-
+### Contributing
 Contributions are welcome!
 Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
@@ -148,9 +146,8 @@ Created in deep respect for my Guru — [Vishnu Sharan Shukla](https://yogasansk
 ### Лицензия
 
 Проект распространяется под [лицензией MIT](LICENSE)
-Участие в разработке
 
----
+### Участие в разработке
 
 Мы открыты для ваших идей и правок!
 Подробные правила — в [CONTRIBUTING.md](CONTRIBUTING.md).
