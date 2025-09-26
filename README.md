@@ -18,7 +18,7 @@ A simple and convenient alternative to a radio microphone for lecturers or tour 
 
 - **Clean UX:**
 - **Mute/Unmute** is a regular tap (with a tiny debounce to ignore micro-taps).
-- **Exit** is a **mong press** on a square ☉ button on the main screen.
+- **Exit** is a **long press** on a square ☉ button on the main screen.
 - Exit action removed from the notification (behavior on swipe depends on OEM).
 - **Android 13/14+ compatibility:**
 - Asks for POST_NOTIFICATIONS on first run (Android 13+).
