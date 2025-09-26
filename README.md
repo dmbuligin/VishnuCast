@@ -24,7 +24,7 @@ A simple and convenient alternative to a radio microphone for lecturers or tour 
 - Asks for POST_NOTIFICATIONS on first run (Android 13+).
 - Foreground Service uses the proper types (*MICROPHONE*/*DATA_SYNC*) for Android 14.
 - Startup is stable on Android 10-14.
-  **Stability:** fixed library init order and foreground lifecycle edge cases.
+-  **Stability:** fixed library init order and foreground lifecycle edge cases.
 
 ### App principle
 
@@ -84,7 +84,7 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ### Credits
 
-Project by dmbuligin aka **Mr. Dima**, with AI collaboration.
+Project by **dmbuligin** aka **Mr. Dima**, with AI collaboration.
 Created in deep respect for my Guru — [Vishnu Sharan Shukla](https://yogasanskar.ru/)
 
 ## RU
