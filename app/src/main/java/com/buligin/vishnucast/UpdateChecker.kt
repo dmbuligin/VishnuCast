@@ -27,9 +27,9 @@ object UpdateChecker {
 
     private const val TAG = "UpdateChecker"
     // Для мока:
-    private const val API_LATEST = "http://192.168.24.1:8000/releases/latest.json"
-    // Для GitHub, когда вернёшь:
-    // private const val API_LATEST = "https://api.github.com/repos/dmbuligin/VishnuCast/releases/latest"
+    //private const val API_LATEST = "http://192.168.24.1:8000/releases/latest.json"
+    // Для GitHub:
+     private const val API_LATEST = "https://api.github.com/repos/dmbuligin/VishnuCast/releases/latest"
 
     fun checkLatest(callback: (Result<ReleaseInfo?>) -> Unit) {
         Thread {
