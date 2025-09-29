@@ -22,8 +22,8 @@ class UpdateProgressDialog(
     private var job: Job? = null
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
-        val inflater = LayoutInflater.from(requireContext())
-        val view = inflater.inflate(R.layout.dialog_update_progress, null, false)
+        val view = LayoutInflater.from(requireContext())
+            .inflate(R.layout.dialog_update_progress, null, false)
 
         val progress = view.findViewById<ProgressBar>(R.id.progressBar)
         val text = view.findViewById<TextView>(R.id.progressText)
@@ -42,8 +42,9 @@ class UpdateProgressDialog(
             if (st != null) onInstall?.invoke(st.file.absolutePath)
         }
 
-        // Подпишемся на состояние загрузки
-        job = viewLifecycleOwner.lifecycleScope.launch {
+        // ВАЖНО: используем lifecycleScope фрагмента (а не viewLifecycleOwner),
+        // т.к. у DialogFragment нет view lifecycle, когда мы в onCreateDialog().
+        job = lifecycleScope.launch {
             UpdateManager.state.collectLatest { st ->
                 when (st) {
                     is UpdateManager.State.Idle -> {
@@ -74,16 +75,15 @@ class UpdateProgressDialog(
             }
         }
 
-        // Собираем диалог без привязки к теме Material3
         return AlertDialog.Builder(requireContext())
             .setView(view)
             .setCancelable(false)
             .create()
     }
 
-    override fun onDestroyView() {
+    override fun onDestroy() {
         job?.cancel()
         job = null
-        super.onDestroyView()
+        super.onDestroy()
     }
 }

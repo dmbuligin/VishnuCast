@@ -155,15 +155,19 @@ object UpdateChecker {
         )
     }
 
-    /** Оставляем только числа и точки (семвер-подобное сравнение) */
+    /**
+     * Нормализация версии:
+     * берем все числовые группы и склеиваем через точку.
+     * Примеры:
+     *  "1.6(383829)" -> "1.6.383829"
+     *  "v1.70000-mock" -> "1.70000"
+     */
     private fun normalizeVersion(raw: String): String {
-        val cleaned = raw.lowercase()
-            .replace(Regex("[^0-9\\.]"), "")
-            .trim('.')
-        return if (cleaned.isBlank()) "0" else cleaned
+        val parts = Regex("\\d+").findAll(raw).map { it.value }.toList()
+        return if (parts.isEmpty()) "0" else parts.joinToString(".")
     }
 
-    /** Сравнение X.Y.Z */
+    /** Сравнение X.Y.Z (разной длины — с нулями справа) */
     private fun compareVersions(a: String, b: String): Int {
         val aspl = a.split('.')
         val bspl = b.split('.')
