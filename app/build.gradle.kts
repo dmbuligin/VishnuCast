@@ -41,7 +41,7 @@ android {
 
 
     val versionMajor = 1
-    val versionMinor = 6
+    val versionMinor = 7
 
     // val versionPatch = 0  // ← больше не нужен, можно вернуть при необходимости
     // versionName = "3.6"
