@@ -149,7 +149,7 @@ object UpdateManager {
         return try {
             val apkUri = FileProvider.getUriForFile(
                 ctx,
-                ctx.packageName + ".fileprovider",
+                ctx.packageName + ".provider",
                 file
             )
             val intent = Intent(Intent.ACTION_VIEW).apply {
