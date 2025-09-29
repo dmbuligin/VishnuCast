@@ -40,8 +40,8 @@ android {
     compileSdk = 36
 
 
-    val versionMajor = 1
-    val versionMinor = 7
+    val versionMajor = 2
+    val versionMinor = 0
     val versionPatch = 1
 
     // versionName = "1.7.0"
