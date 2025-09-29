@@ -14,17 +14,9 @@
 
 A simple and convenient alternative to a radio microphone for lecturers or tour guides, with zero broadcast costs. A clip-on microphone of any type can be used if desired.
 
-### What's new in 1.6
+### What's new in 1.7
 
-- **Clean UX:**
-- **Mute/Unmute** is a regular tap (with a tiny debounce to ignore micro-taps).
-- **Exit** is a **long press** on a square ☉ button on the main screen.
-- Exit action removed from the notification (behavior on swipe depends on OEM).
-- **Android 13/14+ compatibility:**
-- Asks for POST_NOTIFICATIONS on first run (Android 13+).
-- Foreground Service uses the proper types (*MICROPHONE*/*DATA_SYNC*) for Android 14.
-- Startup is stable on Android 10-14.
--  **Stability:** fixed library init order and foreground lifecycle edge cases.
+- New application update procedure
 
 ### App principle
 
@@ -91,17 +83,9 @@ Created in deep respect for my Guru — [Vishnu Sharan Shukla](https://yogasansk
 
 Простая и удобная альтернатива радиомикрофону для лекторов или экскурсоводов, при нулевых затратах на организицаю трансляции. При желании можно использовать микрофон - прищепку любого типа.
 
-### Что нового в 1.6
+### Что нового в 1.7
 
-- **Чистый UX:**
-- **Mute/Unmute** — обычный тап (с защитой от «микро-тычков»).
-- **Выход** — **долгое нажатие** на квадратную кнопку **⏻** справа.
-- Кнопка «Выход» из шторки убрана (поведение свайпа зависит от прошивки).
-- **Совместимость Android 13/14+:**
-- Запрос `POST_NOTIFICATIONS` при первом запуске (Android 13+).
-- Foreground Service использует корректные типы (`MICROPHONE`/`DATA_SYNC`) для Android 14.
-- Устойчивый старт на Android 10–14.
-- **Стабильность:** исправлены порядок инициализации и завершения работы.
+- Новая процедура обновления приложения
 
 * ### Главный принцип
 
