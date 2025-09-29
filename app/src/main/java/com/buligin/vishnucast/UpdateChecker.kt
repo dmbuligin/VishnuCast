@@ -12,10 +12,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.math.max
 
-/**
- * Проверка последнего стабильного релиза на GitHub и сравнение с текущей версией приложения.
- * Источник: https://api.github.com/repos/dmbuligin/VishnuCast/releases/latest
- */
 object UpdateChecker {
 
     data class ReleaseInfo(
@@ -30,17 +26,23 @@ object UpdateChecker {
     )
 
     private const val TAG = "UpdateChecker"
-    private const val API_LATEST = "https://api.github.com/repos/dmbuligin/VishnuCast/releases/latest"
+    // Для мока:
+    //private const val API_LATEST = "http://192.168.24.1:8000/releases/latest.json"
+    // Для GitHub:
+     private const val API_LATEST = "https://api.github.com/repos/dmbuligin/VishnuCast/releases/latest"
 
     fun checkLatest(callback: (Result<ReleaseInfo?>) -> Unit) {
         Thread {
             try {
                 val json = httpGet(API_LATEST)
                 val info = parseLatest(JSONObject(json))
-                // Если удалённая версия не новее — вернём null
+
                 val remote = normalizeVersion(info.versionName)
-                val local = normalizeVersion(BuildConfig.VERSION_NAME)
+                val local  = normalizeVersion(BuildConfig.VERSION_NAME)
                 val newer = compareVersions(remote, local) > 0
+
+                Log.d(TAG, "remote=$remote local=$local newer=$newer url=${info.downloadUrl}")
+
                 Handler(Looper.getMainLooper()).post {
                     callback(Result.success(if (newer) info else null))
                 }
@@ -53,15 +55,14 @@ object UpdateChecker {
         }.start()
     }
 
-    // --- helpers ---
-
     private fun httpGet(urlStr: String): String {
         val url = URL(urlStr)
         val conn = (url.openConnection() as HttpURLConnection).apply {
-            connectTimeout = 8000
-            readTimeout = 8000
+            instanceFollowRedirects = true
+            connectTimeout = 10000
+            readTimeout = 15000
             requestMethod = "GET"
-            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "VishnuCast/${BuildConfig.VERSION_NAME} (Android ${Build.VERSION.RELEASE})")
         }
         conn.inputStream.use { ins ->
@@ -75,22 +76,41 @@ object UpdateChecker {
     }
 
     private fun parseLatest(obj: JSONObject): ReleaseInfo {
+        // Мок-JSON
+        if (obj.has("versionName") || obj.has("downloadUrl") || obj.has("assetName")) {
+            val versionRaw = obj.optString("versionName").ifBlank {
+                obj.optString("tag_name").ifBlank { obj.optString("name") }
+            }
+            val body    = obj.optString("body", "")
+            val htmlUrl = obj.optString("htmlUrl", "https://github.com/dmbuligin/VishnuCast/releases")
+            val asset   = obj.optString("assetName").takeIf { it.isNotBlank() }
+            val dlUrl   = obj.optString("downloadUrl").takeIf { it.isNotBlank() }
+            val verNorm = normalizeVersion(versionRaw.removePrefix("v"))
+
+            return ReleaseInfo(
+                tag = versionRaw.ifBlank { verNorm },
+                versionName = verNorm,
+                isPrerelease = false,
+                body = body,
+                htmlUrl = htmlUrl,
+                assetName = asset,
+                downloadUrl = dlUrl,
+                sizeBytes = 0L
+            )
+        }
+
+        // GitHub JSON
         val tag = obj.optString("tag_name").ifBlank { obj.optString("name") }
         val isPre = obj.optBoolean("prerelease", false)
         val body = obj.optString("body", "")
         val htmlUrl = obj.optString("html_url", "https://github.com/dmbuligin/VishnuCast/releases")
         val assets = obj.optJSONArray("assets") ?: JSONArray()
 
-        // Выбираем APK-ассет: приоритет release > debug > любой .apk
         var bestName: String? = null
         var bestUrl: String? = null
         var bestSize = 0L
-        fun consider(name: String, url: String, size: Long, score: Int): Pair<Int, Boolean> {
-            // score: выше — лучше
-            return Pair(score, true)
-        }
-
         var bestScore = -1
+
         for (i in 0 until assets.length()) {
             val a = assets.optJSONObject(i) ?: continue
             val name = a.optString("name")
@@ -98,8 +118,8 @@ object UpdateChecker {
             val size = a.optLong("size", 0L)
             if (!name.endsWith(".apk", ignoreCase = true)) continue
             val score = when {
-                name.contains("release", ignoreCase = true) -> 3
-                name.contains("debug", ignoreCase = true) -> 1
+                name.contains("release", true) -> 3
+                name.contains("debug", true)   -> 1
                 else -> 2
             }
             if (score > bestScore) {
@@ -123,15 +143,13 @@ object UpdateChecker {
         )
     }
 
-    /** Оставляем только числа и точки (семвер-подобное сравнение) */
+    /** Нормализация: берём все числовые группы и склеиваем через '.' */
     private fun normalizeVersion(raw: String): String {
-        val cleaned = raw.lowercase()
-            .replace(Regex("[^0-9\\.]"), "")
-            .trim('.')
-        return if (cleaned.isBlank()) "0" else cleaned
+        val parts = Regex("\\d+").findAll(raw).map { it.value }.toList()
+        return if (parts.isEmpty()) "0" else parts.joinToString(".")
     }
 
-    /** Сравнение X.Y.Z */
+    /** X.Y.Z сравнение (разная длина — дополняем нулями) */
     private fun compareVersions(a: String, b: String): Int {
         val aspl = a.split('.')
         val bspl = b.split('.')

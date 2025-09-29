@@ -14,7 +14,7 @@
     <!-- Buttons -->
     <string name="btn_start">Старт трансляции</string>
     <string name="btn_stop">Стоп</string>
-    <string name="hold_to_toggle">Удерживайте для старта/стопа</string>
+    <string name="hold_to_toggle">Удерживайте для выхода</string>
     <string name="exit_confirm_title">Выход</string>
     <string name="exit_confirm_msg">Остановить трансляцию и выйти?</string>
     <string name="exit_confirm_yes">Выйти</string>
@@ -101,6 +101,16 @@
     <string name="upd_chan_name">Обновления VishnuCast</string>
     <string name="upd_title">Доступно обновление: v%1$s</string>
     <string name="upd_text">Нажмите, чтобы скачать и установить</string>
+
+
+    <string name="update_downloading">Загрузка обновления…</string>
+    <string name="update_progress_fmt">Загрузка: %1$d%%</string>
+    <string name="update_ready_install">Готово к установке</string>
+    <string name="update_failed_fmt">Ошибка загрузки: %1$s</string>
+    <string name="install">Установить</string>
+    <string name="cancel">Отмена</string>
+    <string name="update_enable_unknown_sources">Разрешите установку из этого источника</string>
+
 
 
 </resources>

@@ -52,7 +52,10 @@ import android.widget.ImageButton
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 
-
+// === ДОБАВЛЕНО: для управляемого обновления ===
+import com.buligin.vishnucast.update.UpdateManager
+import com.buligin.vishnucast.update.UpdateProgressDialog
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -169,11 +172,6 @@ class MainActivity : AppCompatActivity() {
                 Toast.LENGTH_SHORT).show()
         }
 
-
-
-
-
-
         arrowHint = findViewById(R.id.arrowHint)
         levelBar = findViewById(R.id.signalLevelBar)
 
@@ -201,7 +199,6 @@ class MainActivity : AppCompatActivity() {
         // Порог "не микротапа"
         val minPressMs = 60L
         val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
-
 
         btnToggle.setOnTouchListener { v, e ->
             // локальные статики
@@ -245,8 +242,6 @@ class MainActivity : AppCompatActivity() {
                         setMicEnabled(wantEnable)
                     } else {
                         // слишком короткий "тычок" — игнорируем
-                        // при желании можно показать короткую подсказку один раз
-                        // Toast.makeText(this, R.string.hold_briefly, Toast.LENGTH_SHORT).show()
                     }
                     true
                 }
@@ -257,7 +252,6 @@ class MainActivity : AppCompatActivity() {
                 else -> false
             }
         }
-
 
         sliderContainer.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
@@ -311,7 +305,7 @@ class MainActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
         R.id.action_exit -> { performExitFromUi(); true }
         // Настройки спрятал
-   //     R.id.menu_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
+        // R.id.menu_settings -> { startActivity(Intent(this, SettingsActivity::class.java)); true }
         R.id.action_language -> { showLanguagePicker(); true }
         R.id.action_check_updates -> { checkForUpdates(); true }
         R.id.action_about -> { startActivity(Intent(this, AboutActivity::class.java)); true }
@@ -337,11 +331,6 @@ class MainActivity : AppCompatActivity() {
             v.setTag(key.hashCode(), value)
         }
     }
-
-
-
-
-
 
     private fun handleExitNowIntent(i: Intent?) {
         if (i?.action == CastService.ACTION_EXIT_NOW) {
@@ -571,7 +560,8 @@ class MainActivity : AppCompatActivity() {
         if (info.downloadUrl != null && info.assetName != null) {
             b.setPositiveButton(R.string.update_btn_download) { _, _ ->
                 val fn = info.assetName.ifBlank { "VishnuCast-${info.versionName}.apk" }
-                ApkDownloader.downloadAndInstall(this, info.downloadUrl, fn)
+                // === ЗАМЕНА: запускаем контролируемое скачивание с прогрессом ===
+                onMenuDownloadAndInstall(info.downloadUrl, fn)
             }
         }
         b.show()
@@ -582,7 +572,8 @@ class MainActivity : AppCompatActivity() {
             val url  = i.getStringExtra(UpdateProtocol.EXTRA_UPDATE_URL)
             val name = i.getStringExtra(UpdateProtocol.EXTRA_UPDATE_NAME) ?: "VishnuCast-update.apk"
             if (!url.isNullOrBlank()) {
-                ApkDownloader.downloadAndInstall(this, url, name)
+                // === ЗАМЕНА: используем управляемое скачивание ===
+                onMenuDownloadAndInstall(url, name)
             }
             i.action = null
         }
@@ -593,11 +584,31 @@ class MainActivity : AppCompatActivity() {
         updateUiRunning(!muted)
     }
 
+    // ======== ДОБАВЛЕНО: управляемое скачивание и установка APK ========
+    private fun onMenuDownloadAndInstall(url: String, fileName: String = "VishnuCast-latest.apk") {
+        // 1) Для Android O+ убедимся, что можно устанавливать из "неизвестных источников"
+        if (!UpdateManager.canRequestInstall(this)) {
+            UpdateManager.openUnknownSourcesSettings(this)
+            // Пользователь вернётся — можно повторить действие.
+        }
 
+        // 2) Покажем диалог прогресса (не закрываем активити!)
+        val dlg = UpdateProgressDialog(
+            onCancel = { UpdateManager.cancel() },
+            onInstall = { path ->
+                val ok = UpdateManager.installApk(this, File(path))
+                if (!ok) {
+                    // Фоллбек на системный "Загрузки"
+                    try {
+                        val intent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
+                        startActivity(intent)
+                    } catch (_: Throwable) {}
+                }
+            }
+        )
+        dlg.show(supportFragmentManager, "upd")
 
-
-
-
-
-
+        // 3) Поехали качать
+        UpdateManager.startDownload(this, url, fileName)
+    }
 }

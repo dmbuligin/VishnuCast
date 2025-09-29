@@ -16,7 +16,7 @@
     <!-- Buttons -->
     <string name="btn_start">Start streaming</string>
     <string name="btn_stop">Stop</string>
-    <string name="hold_to_toggle">Hold to start/stop</string>
+    <string name="hold_to_toggle">Hold to exit</string>
     <string name="exit_confirm_title">Exit</string>
     <string name="exit_confirm_msg">Stop streaming and exit?</string>
     <string name="exit_confirm_yes">Exit</string>
@@ -104,6 +104,16 @@
     <string name="upd_chan_name">VishnuCast updates</string>
     <string name="upd_title">Update available: v%1$s</string>
     <string name="upd_text">Tap to download &amp; install</string>
+
+
+    <string name="update_downloading">Downloading update…</string>
+    <string name="update_progress_fmt">Progress: %1$d%%</string>
+    <string name="update_ready_install">Ready to install</string>
+    <string name="update_failed_fmt">Download failed: %1$s</string>
+    <string name="install">Install</string>
+    <string name="cancel">Cancel</string>
+    <string name="update_enable_unknown_sources">Allow installation from this source</string>
+
 
 
 
