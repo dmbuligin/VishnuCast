@@ -21,6 +21,8 @@ class MainActivity : AppCompatActivity() {
     // ... (твои поля, permissions, старт/стоп сервиса и т.п.)
 
     // --- Player ---
+    private var playerUiBinder: com.buligin.vishnucast.ui.PlayerUiBinder? = null
+
     private lateinit var player: PlayerCore
     private lateinit var playlistStore: PlaylistStore
 
@@ -73,6 +75,10 @@ class MainActivity : AppCompatActivity() {
         observePlayer()
 
         uiHandler.post(ticker)
+        playerUiBinder = com.buligin.vishnucast.ui.PlayerUiBinder(this).attach()
+
+
+
     }
 
     private fun bindPlayerViews() {
@@ -127,6 +133,10 @@ class MainActivity : AppCompatActivity() {
         uiHandler.removeCallbacks(ticker)
         // Не освобождаем плеер, если он должен жить в сервисе — на Этапе B перенесём в CastService.
         player.release()
+
+        playerUiBinder?.release()
+        playerUiBinder = null
+
     }
 
     // --- Меню ---
