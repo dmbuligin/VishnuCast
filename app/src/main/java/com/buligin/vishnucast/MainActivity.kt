@@ -131,7 +131,7 @@ class MainActivity : AppCompatActivity() {
 
     // --- Меню ---
     override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
-        menuInflater.inflate(R.menu.menu_main, menu)
+        menuInflater.inflate(R.menu.main_menu, menu)
         return true
     }
 

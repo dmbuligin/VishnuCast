@@ -189,6 +189,7 @@
                 android:text="Connected clients: 0"
                 android:textColor="#6B7280"
                 android:textSize="14sp" />
+
             <include
                 layout="@layout/include_player_panel"
                 android:layout_width="match_parent"
