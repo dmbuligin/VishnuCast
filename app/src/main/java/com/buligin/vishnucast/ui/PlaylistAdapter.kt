@@ -33,10 +33,7 @@ class PlaylistAdapter(
         holder.remove.setOnClickListener { onRemove(item.id) }
 
 
-        holder.itemView.setOnClickListener {
-            val idx = holder.bindingAdapterPosition
-            if (idx != RecyclerView.NO_POSITION) onClick(idx)
-        }
+        holder.itemView.setOnClickListener { onClick(position) }
 
 
 

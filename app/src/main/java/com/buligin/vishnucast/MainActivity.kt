@@ -324,7 +324,8 @@ class MainActivity : AppCompatActivity() {
         R.id.action_refresh -> { refreshNetworkUi(); true }
 
         R.id.action_open_playlist -> {
-            openPlaylist.launch(Intent(this, com.buligin.vishnucast.ui.PlaylistActivity::class.java))
+            openPlaylist.launch(android.content.Intent(this, com.buligin.vishnucast.ui.PlaylistActivity::class.java))
+
 
             true
         }
@@ -634,13 +635,22 @@ class MainActivity : AppCompatActivity() {
         UpdateManager.startDownload(this, url, fileName)
     }
 
+//    private val openPlaylist = registerForActivityResult(
+//        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+//    ) { res ->
+//        val idx = res.data?.getIntExtra("startIndex", -1) ?: -1
+//        // Если трек выбрали — вернётся RESULT_OK и индекс; если нет — может быть CANCELED.
+//        // В обоих случаях перечитываем плейлист; при валидном индексе — стартуем воспроизведение.
+//        playerUiBinder?.reloadPlaylistAndPlay(if (idx >= 0) idx else null)
+//    }
+
+
     private val openPlaylist = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
     ) { res ->
         val idx = res.data?.getIntExtra("startIndex", -1) ?: -1
-        // Если трек выбрали — вернётся RESULT_OK и индекс; если нет — может быть CANCELED.
-        // В обоих случаях перечитываем плейлист; при валидном индексе — стартуем воспроизведение.
-        playerUiBinder?.reloadPlaylistAndPlay(if (idx >= 0) idx else null)
+        // если трек выбран – запускаем его; иначе просто перечитаем плейлист
+        playerUiBinder?.reloadPlaylistAndPlay(if (res.resultCode == android.app.Activity.RESULT_OK && idx >= 0) idx else null)
     }
 
 

@@ -49,15 +49,15 @@ class PlaylistActivity : AppCompatActivity() {
         list = store.load()
 
         val rv = findViewById<RecyclerView>(R.id.playlistRecycler)
+
         adapter = PlaylistAdapter(
             onRemove = { id ->
                 list = store.remove(id).toMutableList()
                 adapter.submit(list)
             },
             onClick = { index ->
-                // Вернём индекс трека для немедленного запуска в MainActivity
-                val data = Intent().putExtra("startIndex", index)
-                setResult(RESULT_OK, data)
+                val data = android.content.Intent().putExtra("startIndex", index)
+                setResult(android.app.Activity.RESULT_OK, data)
                 finish()
             }
         )

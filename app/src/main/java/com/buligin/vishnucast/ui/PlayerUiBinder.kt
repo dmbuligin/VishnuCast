@@ -46,47 +46,22 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         if (!this::player.isInitialized) return
         val list = playlistStore.load()
         val enabled = list.isNotEmpty()
-        btnPrev?.isEnabled = enabled
-        btnNext?.isEnabled = enabled
-        seek?.isEnabled = enabled
+        setControlsEnabled(enabled)
 
-
-        if (list.isEmpty()) {
+        if (!enabled) {
             player.setPlaylist(list)
-            // Сбросить UI до дефолта
-            tvTitle?.text = activity.getString(R.string.cast_player_title)
-            tvNow?.text = "0:00"
-            tvDur?.text = "0:00"
-            seek?.max = 0
-            seek?.progress = 0
-            btnPlayPause?.setImageResource(R.drawable.ic_play_24)
-            val enabled = list.isNotEmpty()
-            btnPrev?.isEnabled = enabled
-            btnNext?.isEnabled = enabled
-            seek?.isEnabled = enabled
-
-
-
-
-
+            resetUiToDefaults()
             return
         }
 
-
-
-
-
-
-        if (startIndex != null && startIndex >= 0 && startIndex < list.size) {
+        if (startIndex != null && startIndex in list.indices) {
             player.setPlaylist(list, startIndex)
             player.play()
         } else {
-            // без автозапуска: просто обновим содержимое
+            // без автозапуска: просто обновим содержимое и сохраним текущий индекс
             player.setPlaylist(list, player.currentIndex().coerceAtLeast(0))
         }
     }
-
-
 
     fun attach(root: View = activity.findViewById(android.R.id.content)): PlayerUiBinder {
         // Инициализация core
@@ -107,35 +82,30 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         // Если панель отсутствует — выходим тихо, не мешаем экрану
         if (btnPlayPause == null || seek == null) return this
 
-
+        // Начальное состояние enable/disable
+        setControlsEnabled(playlistStore.load().isNotEmpty())
 
         btnPrev?.setOnClickListener {
-            val hasItems = PlaylistStore(activity).load().isNotEmpty()
-            if (hasItems) { player.previous(); player.play() }
+            if (playlistStore.load().isNotEmpty()) {
+                player.previous()
+                player.play()
+            }
         }
-
         btnNext?.setOnClickListener {
-            val hasItems = PlaylistStore(activity).load().isNotEmpty()
-            if (hasItems) { player.next(); player.play() }
+            if (playlistStore.load().isNotEmpty()) {
+                player.next()
+                player.play()
+            }
         }
-
-
-
-
-
-
 
         btnPlayPause?.setOnClickListener { player.toggle() }
 
-        /* Ддолгий тап = STOP */
+        /* Долгий тап = STOP */
         btnPlayPause?.setOnLongClickListener {
             player.pause()
             player.seekTo(0L)
             true
         }
-
-
-
 
         seek?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -180,6 +150,23 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         if (event == Lifecycle.Event.ON_DESTROY) {
             release()
         }
+    }
+
+    // --- helpers ---
+
+    private fun resetUiToDefaults() {
+        tvTitle?.text = activity.getString(R.string.cast_player_title)
+        tvNow?.text = "0:00"
+        tvDur?.text = "0:00"
+        seek?.max = 0
+        seek?.progress = 0
+        btnPlayPause?.setImageResource(R.drawable.ic_play_24)
+    }
+
+    private fun setControlsEnabled(enabled: Boolean) {
+        btnPrev?.isEnabled = enabled
+        btnNext?.isEnabled = enabled
+        seek?.isEnabled = enabled
     }
 
     private fun formatMs(ms: Long): String {
