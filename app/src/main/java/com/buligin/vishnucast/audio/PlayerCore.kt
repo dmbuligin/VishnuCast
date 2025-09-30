@@ -8,7 +8,6 @@ import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.Player
-import com.google.android.exoplayer2.audio.AudioProcessor
 
 class PlayerCore(context: Context) {
 
@@ -16,7 +15,7 @@ class PlayerCore(context: Context) {
     private val tee = ExoTeeAudioProcessor()
 
     private val exo: ExoPlayer = ExoPlayer.Builder(app)
-        .setAudioProcessors(listOf<AudioProcessor>(tee))
+        .setRenderersFactory(TeeRenderersFactory(app, arrayOf(tee)))
         .build().apply {
             repeatMode = Player.REPEAT_MODE_OFF
         }
@@ -51,7 +50,7 @@ class PlayerCore(context: Context) {
         exo.stop()
         exo.clearMediaItems()
         val mediaItems: List<MediaItem> = items.sortedBy { it.sort }.map { it.toMediaItem() }
-        val start = mediaItems.indices.takeIf { it.isNotEmpty() }?.let { startIndex.coerceIn(it.first, it.last) } ?: 0
+        val start = if (mediaItems.isNotEmpty()) startIndex.coerceIn(0, mediaItems.lastIndex) else 0
         exo.setMediaItems(mediaItems, start, 0L)
         exo.prepare()
     }
@@ -66,7 +65,6 @@ class PlayerCore(context: Context) {
     fun setVolume01(v: Float) { exo.volume = v.coerceIn(0f, 1f) }
     fun release() { exo.release() }
 
-    /** Обновлять из UI таймером ~раз в 500 мс */
     fun tick() {
         _positionMs.postValue(exo.currentPosition)
         _durationMs.postValue(if (exo.duration > 0) exo.duration else 0L)
