@@ -154,7 +154,7 @@ class WebRtcCore(private val ctx: Context) {
             }
         }
 
-        d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
+        //d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
 
         if (clients > 0) {
             if (probeRunning) { probe.stop(); d("guard: stopped probe (clients>0)") }
