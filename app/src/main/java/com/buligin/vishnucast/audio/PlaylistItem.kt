@@ -2,7 +2,6 @@ package com.buligin.vishnucast.audio
 
 import android.net.Uri
 
-@Serializable
 data class PlaylistItem(
     val id: String,            // stable UUID
     val uri: String,           // persisted as string (content:// or file://)

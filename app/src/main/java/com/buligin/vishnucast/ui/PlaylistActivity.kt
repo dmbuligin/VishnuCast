@@ -16,6 +16,11 @@ import com.buligin.vishnucast.audio.PlaylistStore
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
 import java.util.Collections
+import android.view.View
+
+
+
+
 
 class PlaylistActivity : AppCompatActivity() {
 
@@ -86,11 +91,7 @@ class PlaylistActivity : AppCompatActivity() {
                 val id = list[idx].id
                 list = store.remove(id).toMutableList()
                 adapter.submit(list)
-                Snackbar.make(
-                    findViewById(R.id.playlistRoot),
-                    R.string.cast_removed,
-                    Snackbar.LENGTH_SHORT
-                ).show()
+                Snackbar.make(findViewById<View>(R.id.playlistRoot), R.string.cast_removed, Snackbar.LENGTH_SHORT).show()
             }
 
             override fun clearView(

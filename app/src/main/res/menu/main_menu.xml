@@ -5,8 +5,7 @@
     <item
         android:id="@+id/action_open_playlist"
         android:title="@string/cast_playlist_title"
-        android:icon="@drawable/ic_queue_music_24"
-        android:showAsAction="never" />
+        app:showAsAction="never" />
 
 
     <item

@@ -121,5 +121,8 @@
     <string name="cast_next">Следующий</string>
     <string name="cast_play_pause">Воспроизведение/Пауза</string>
 
+    <string name="cast_removed">Удалено</string>
+
+
 
 </resources>
