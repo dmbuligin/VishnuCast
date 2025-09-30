@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.7.1] - 2025-09-30
+### Changed
+- versionPatch is back!
+
+
 ## [1.7.0] - 2025-09-29
 ### Changed
 - New application update procedure
