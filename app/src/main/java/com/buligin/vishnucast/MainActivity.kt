@@ -327,6 +327,7 @@ class MainActivity : AppCompatActivity() {
             openPlaylist.launch(android.content.Intent(this, com.buligin.vishnucast.ui.PlaylistActivity::class.java))
 
 
+
             true
         }
 
@@ -649,11 +650,10 @@ class MainActivity : AppCompatActivity() {
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
     ) { res ->
         val idx = res.data?.getIntExtra("startIndex", -1) ?: -1
-        // если трек выбран – запускаем его; иначе просто перечитаем плейлист
-        playerUiBinder?.reloadPlaylistAndPlay(if (res.resultCode == android.app.Activity.RESULT_OK && idx >= 0) idx else null)
+        playerUiBinder?.reloadPlaylistAndPlay(
+            if (res.resultCode == android.app.Activity.RESULT_OK && idx >= 0) idx else null
+        )
     }
-
-
 
 
 
