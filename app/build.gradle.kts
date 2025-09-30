@@ -42,12 +42,13 @@ android {
 
     val versionMajor = 1
     val versionMinor = 7
+    val versionPatch = 1
 
-    // val versionPatch = 0  // ← больше не нужен, можно вернуть при необходимости
-    // versionName = "3.6"
-    val verName = "$versionMajor.$versionMinor"
+    // versionName = "1.7.0"
+    val verName = "$versionMajor.$versionMinor.$versionPatch"
     // versionCode = 306  (3*100 + 6)
-    val verCode = versionMajor * 100 + versionMinor
+    //val verCode = versionMajor * 100 + versionMinor
+    val verCode = versionMajor * 10000 + versionMinor * 100 + versionPatch
 
     defaultConfig {
         applicationId = "com.buligin.vishnucast"
