@@ -296,6 +296,12 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
         syncUiFromService()
+
+        if (playerUiBinder == null) {
+            playerUiBinder = com.buligin.vishnucast.ui.PlayerUiBinder(this).attach()
+        }
+
+
     }
 
     override fun onStop() {
@@ -303,7 +309,6 @@ class MainActivity : AppCompatActivity() {
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         arrowHint.stopHint()
         hideArrowHint()
-        playerUiBinder?.release(); playerUiBinder = null
 
     }
 
