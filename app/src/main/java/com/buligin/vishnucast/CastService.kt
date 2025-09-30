@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.Binder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.buligin.vishnucast.audio.PlayerCore
@@ -14,66 +15,48 @@ import com.buligin.vishnucast.audio.PlaylistStore
 class CastService : Service() {
 
     private var server: VishnuServer? = null
-    private var isFgShown: Boolean = false // флаг: уведомление реально запущено через startForeground
+    private var isFgShown: Boolean = false
 
-    // --- Player в сервисе (B1): живёт столько же, сколько сервис ---
+    // --- Player в сервисе ---
     private lateinit var player: PlayerCore
     private lateinit var playlistStore: PlaylistStore
+
+    // --- Binder для UI ---
+    inner class LocalBinder : Binder() {
+        val service: CastService get() = this@CastService
+    }
+    private val binder = LocalBinder()
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannelIfNeeded()
-
-        // На старте сервиса — FGS с типом DATA_SYNC (Android 14 требует тип)
         startAsForeground(withMicType = false)
-
-        // Поднять HTTP/WS сразу
         startHttpWsIfNeeded()
 
-        // Инициализировать плеер (B1): плейлист подтягиваем из хранилища
         playlistStore = PlaylistStore(this)
-        player = PlayerCore(this).also {
-            it.setPlaylist(playlistStore.load())
-        }
+        player = PlayerCore(this).also { it.setPlaylist(playlistStore.load()) }
 
-        // Mute по умолчанию
         applyMute(true)
-
         isRunning = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> startHttpWsIfNeeded()
-
-            ACTION_STOP -> {
-                performExit()
-                return START_NOT_STICKY
-            }
-
-            ACTION_MUTE -> {
-                applyMute(true)
-            }
-
-            ACTION_UNMUTE -> {
-                // Перед открытием микрофона — перевзводим FGS с типом MICROPHONE
-                startAsForeground(withMicType = true)
-                applyMute(false)
-            }
-
-            ACTION_EXIT -> {
-                performExit()
-                return START_NOT_STICKY
-            }
+            ACTION_STOP  -> { performExit(); return START_NOT_STICKY }
+            ACTION_MUTE  -> applyMute(true)
+            ACTION_UNMUTE -> { startAsForeground(withMicType = true); applyMute(false) }
+            ACTION_EXIT  -> { performExit(); return START_NOT_STICKY }
         }
         return START_NOT_STICKY
     }
 
-    private fun performExit() {
-        // 1) Глушим микрофон
-        applyMute(true)
+    override fun onBind(intent: Intent?): IBinder = binder
 
-        // 2) Снимаем FGS-уведомление и останавливаем сервис
+    fun playerCore(): PlayerCore? = if (this::player.isInitialized) player else null
+
+    private fun performExit() {
+        applyMute(true)
         try { stopForeground(true) } catch (_: Throwable) {}
         isFgShown = false
         stopSelf()
@@ -88,15 +71,12 @@ class CastService : Service() {
         isRunning = false
         try { server?.shutdown() } catch (_: Throwable) {}
         server = null
-        // Освободить плеер (B1)
         runCatching { if (this::player.isInitialized) player.release() }
         try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
         super.onDestroy()
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    // --- FGS helper ---
+    // --- FGS/HTTP/WS/Notification ниже без изменений ---
     private fun startAsForeground(withMicType: Boolean) {
         val notif = buildRunningNotification()
         if (Build.VERSION.SDK_INT >= 29) {
@@ -105,32 +85,24 @@ class CastService : Service() {
             else
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             startForeground(NOTIF_ID, notif, type)
-        } else {
-            startForeground(NOTIF_ID, notif)
-        }
+        } else startForeground(NOTIF_ID, notif)
         isFgShown = true
     }
 
-    // --- HTTP/WS ---
     private fun startHttpWsIfNeeded() {
         if (server != null) return
         val sp = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val port = sp.getInt(KEY_PORT, 8080).coerceIn(1, 65535)
-        server = VishnuServer(applicationContext, port).also {
-            it.launch(120_000, false)
-        }
+        server = VishnuServer(applicationContext, port).also { it.launch(120_000, false) }
         updateNotification()
     }
 
-    // --- Mute state ---
     private fun applyMute(muted: Boolean) {
         try { WebRtcCoreHolder.get(applicationContext).setMuted(muted) } catch (_: Throwable) {}
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_MUTED, muted).apply()
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_MUTED, muted).apply()
         updateNotification()
     }
 
-    // --- Notification ---
     private fun buildRunningNotification(): Notification {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -145,21 +117,17 @@ class CastService : Service() {
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setContentIntent(piOpen)
-            .setOngoing(true) // делает уведомление несмахиваемым
+            .setOngoing(true)
             .setAutoCancel(false)
             .setCategory(Notification.CATEGORY_SERVICE)
-
-        // Сделать показ foreground-уведомления немедленным (API 31+, совместимо через compat)
-        b.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
 
         val notif = b.build()
-        // дубль страховки от некоторого OEM: NO_CLEAR
         notif.flags = notif.flags or Notification.FLAG_NO_CLEAR or Notification.FLAG_ONGOING_EVENT
         return notif
     }
 
     private fun updateNotification() {
-        // Обновляем только еслиForeground реально показан; иначе избавимся от "Cannot find enqueued record..."
         if (!isFgShown) return
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIF_ID, buildRunningNotification())
@@ -190,7 +158,7 @@ class CastService : Service() {
     }
 
     companion object {
-        const val ACTION_EXIT_NOW = "com.buligin.vishnucast.action.EXIT_NOW" // интент в Activity
+        const val ACTION_EXIT_NOW = "com.buligin.vishnucast.action.EXIT_NOW"
         const val ACTION_EXIT = "com.buligin.vishnucast.action.EXIT"
 
         @Volatile var isRunning: Boolean = false
