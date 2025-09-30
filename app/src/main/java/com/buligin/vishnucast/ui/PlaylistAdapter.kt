@@ -31,7 +31,16 @@ class PlaylistAdapter(
         val item = data[position]
         holder.title.text = item.title.ifBlank { holder.itemView.context.getString(R.string.cast_unknown_track) }
         holder.remove.setOnClickListener { onRemove(item.id) }
-        holder.itemView.setOnClickListener { onClick(position) }
+
+
+        holder.itemView.setOnClickListener {
+            val idx = holder.bindingAdapterPosition
+            if (idx != RecyclerView.NO_POSITION) onClick(idx)
+        }
+
+
+
+
     }
 
     override fun getItemCount(): Int = data.size

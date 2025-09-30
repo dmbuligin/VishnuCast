@@ -45,11 +45,38 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
     fun reloadPlaylistAndPlay(startIndex: Int?) {
         if (!this::player.isInitialized) return
         val list = playlistStore.load()
+        val enabled = list.isNotEmpty()
+        btnPrev?.isEnabled = enabled
+        btnNext?.isEnabled = enabled
+        seek?.isEnabled = enabled
+
+
         if (list.isEmpty()) {
-            // нет треков — просто сбросим плейлист
             player.setPlaylist(list)
+            // Сбросить UI до дефолта
+            tvTitle?.text = activity.getString(R.string.cast_player_title)
+            tvNow?.text = "0:00"
+            tvDur?.text = "0:00"
+            seek?.max = 0
+            seek?.progress = 0
+            btnPlayPause?.setImageResource(R.drawable.ic_play_24)
+            val enabled = list.isNotEmpty()
+            btnPrev?.isEnabled = enabled
+            btnNext?.isEnabled = enabled
+            seek?.isEnabled = enabled
+
+
+
+
+
             return
         }
+
+
+
+
+
+
         if (startIndex != null && startIndex >= 0 && startIndex < list.size) {
             player.setPlaylist(list, startIndex)
             player.play()
@@ -80,9 +107,35 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         // Если панель отсутствует — выходим тихо, не мешаем экрану
         if (btnPlayPause == null || seek == null) return this
 
-        btnPrev?.setOnClickListener { player.previous() }
-        btnNext?.setOnClickListener { player.next() }
+
+
+        btnPrev?.setOnClickListener {
+            val hasItems = PlaylistStore(activity).load().isNotEmpty()
+            if (hasItems) { player.previous(); player.play() }
+        }
+
+        btnNext?.setOnClickListener {
+            val hasItems = PlaylistStore(activity).load().isNotEmpty()
+            if (hasItems) { player.next(); player.play() }
+        }
+
+
+
+
+
+
+
         btnPlayPause?.setOnClickListener { player.toggle() }
+
+        /* Ддолгий тап = STOP */
+        btnPlayPause?.setOnLongClickListener {
+            player.pause()
+            player.seekTo(0L)
+            true
+        }
+
+
+
 
         seek?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
