@@ -129,7 +129,7 @@ class WebRtcCore(private val ctx: Context) {
                 d("guard: restarted stats (muted & clients>0)")
             }
 
-            d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
+            //d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
             return
         }
 
