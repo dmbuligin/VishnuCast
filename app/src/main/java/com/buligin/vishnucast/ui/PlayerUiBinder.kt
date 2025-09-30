@@ -56,11 +56,14 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
 
         if (startIndex != null && startIndex in list.indices) {
             player.setPlaylist(list, startIndex)
-            player.play()
+            player.pause()
+            player.seekTo(0L) // остаёмся на паузе в начале трека
         } else {
-            // без автозапуска: просто обновим содержимое и сохраним текущий индекс
             player.setPlaylist(list, player.currentIndex().coerceAtLeast(0))
         }
+
+
+
     }
 
     fun attach(root: View = activity.findViewById(android.R.id.content)): PlayerUiBinder {
