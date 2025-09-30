@@ -33,12 +33,23 @@ class PlaylistAdapter(
         holder.remove.setOnClickListener { onRemove(item.id) }
 
 
-        holder.itemView.setOnClickListener { onClick(position) }
-
-
-
+        holder.itemView.setOnClickListener {
+            val idx = holder.bindingAdapterPosition
+            if (idx != androidx.recyclerview.widget.RecyclerView.NO_POSITION) onClick(idx)
+        }
 
     }
+
+    fun move(from: Int, to: Int) {
+        if (from in data.indices && to in data.indices) {
+            java.util.Collections.swap(data, from, to)
+            notifyItemMoved(from, to)
+        }
+    }
+
+    fun current(): List<PlaylistItem> = data
+
+
 
     override fun getItemCount(): Int = data.size
 

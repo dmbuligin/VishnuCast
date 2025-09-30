@@ -91,14 +91,19 @@ class PlaylistActivity : AppCompatActivity() {
             ): Boolean {
                 val from = viewHolder.bindingAdapterPosition
                 val to = target.bindingAdapterPosition
-                Collections.swap(list, from, to)
-                adapter.notifyItemMoved(from, to)
+
+                adapter.move(from, to)
+                list = adapter.current().toMutableList()
+
+
                 return true
             }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val idx = viewHolder.bindingAdapterPosition
-                val id = list[idx].id
+
+                val id = adapter.current()[idx].id
+
                 list = store.remove(id).toMutableList()
                 adapter.submit(list)
                 Snackbar.make(findViewById<View>(R.id.playlistRoot), R.string.cast_removed, Snackbar.LENGTH_SHORT).show()
@@ -109,8 +114,9 @@ class PlaylistActivity : AppCompatActivity() {
                 viewHolder: RecyclerView.ViewHolder
             ) {
                 super.clearView(recyclerView, viewHolder)
+
                 // сохранить порядок
-                store.reorder(list.map { it.id })
+                store.reorder(adapter.current().map { it.id })
             }
         })
         touchHelper.attachToRecyclerView(rv)
