@@ -41,6 +41,26 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         }
     }
 
+    /** Перечитать playlist из хранилища и (опц.) начать воспроизведение с индекса */
+    fun reloadPlaylistAndPlay(startIndex: Int?) {
+        if (!this::player.isInitialized) return
+        val list = playlistStore.load()
+        if (list.isEmpty()) {
+            // нет треков — просто сбросим плейлист
+            player.setPlaylist(list)
+            return
+        }
+        if (startIndex != null && startIndex >= 0 && startIndex < list.size) {
+            player.setPlaylist(list, startIndex)
+            player.play()
+        } else {
+            // без автозапуска: просто обновим содержимое
+            player.setPlaylist(list, player.currentIndex().coerceAtLeast(0))
+        }
+    }
+
+
+
     fun attach(root: View = activity.findViewById(android.R.id.content)): PlayerUiBinder {
         // Инициализация core
         playlistStore = PlaylistStore(app)
