@@ -20,6 +20,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
+import com.buligin.vishnucast.service.MixerState // B1: наблюдаем α
 
 class WebRtcCore(private val ctx: Context) {
 
@@ -43,6 +44,9 @@ class WebRtcCore(private val ctx: Context) {
 
     // Зонд микрофона для режима «нет клиентов»
     private val probe = MicLevelProbe(ctx)
+
+    // --- MIXER: текущий α (0..1), для диагностик/логов ---
+    @Volatile private var lastMixerAlpha: Float = MixerState.alpha01.value ?: 0f
 
     // --- DIAG/LOG ---
     private fun d(msg: String) { if (LOG_ENABLED) Log.d(TAG, msg) }
@@ -93,7 +97,12 @@ class WebRtcCore(private val ctx: Context) {
         adm.setMicrophoneMute(true)
         muted.set(true)
         SignalLevel.post(0)
-        d("init: ADM & audioTrack ready, start muted")
+        d("init: ADM & audioTrack ready, start muted; mixer α=${"%.2f".format(lastMixerAlpha)}")
+
+        // Подписка на изменения α (для логов/диагностики; B2 будет использоваться микшером)
+        MixerState.alpha01.observeForever { a ->
+            lastMixerAlpha = a ?: 0f
+        }
 
         startGuardTimer()
     }
@@ -116,6 +125,9 @@ class WebRtcCore(private val ctx: Context) {
         val pending = pendingPeerCount.get()
         val hasActiveOrPending = (clients + pending) > 0
 
+        // B1: лёгкий heartbeat α, чтобы видеть связку UI↔CORE
+        maybeVerbose("guard: muted=$isMuted clients=$clients pending=$pending α=${"%.2f".format(lastMixerAlpha)}")
+
         if (isMuted) {
             if (probeRunning) { probe.stop(); d("guard: stopped probe (muted)") }
 
@@ -129,36 +141,12 @@ class WebRtcCore(private val ctx: Context) {
                 d("guard: restarted stats (muted & clients>0)")
             }
 
-            //d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
             return
         }
 
         if (hasActiveOrPending) {
             if (probeRunning) { probe.stop(); d("guard: stopped probe (active/pending)") }
             if (clients > 0 && !statsActive && statsPc != null) {
-                restartStatsTimer()
-                d("guard: restarted stats (clients>0)")
-            }
-        } else {
-            if (statsActive) {
-                try { statsTimer?.cancel() } catch (_: Throwable) {}
-                statsTimer = null
-                statsPc = null
-                d("guard: stopped stats (no clients)")
-            }
-            if (!probeRunning) {
-                probe.setRelease(LEVEL_RELEASE_PER_SEC)
-                probe.setTickMs(LEVEL_TICK_MS)
-                probe.start { level01 -> onExternalLevel(level01) }
-                d("guard: started probe (no clients)")
-            }
-        }
-
-        //d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
-
-        if (clients > 0) {
-            if (probeRunning) { probe.stop(); d("guard: stopped probe (clients>0)") }
-            if (!statsActive && statsPc != null) {
                 restartStatsTimer()
                 d("guard: restarted stats (clients>0)")
             }
@@ -190,7 +178,7 @@ class WebRtcCore(private val ctx: Context) {
             probe.stop()
             d("setMuted: ON → level=0, probe stop")
         } else {
-            d("setMuted: OFF")
+            d("setMuted: OFF (mixer α=${"%.2f".format(lastMixerAlpha)})")
             if (connectedPeerCount.get() == 0) {
                 probe.setRelease(LEVEL_RELEASE_PER_SEC)
                 probe.setTickMs(LEVEL_TICK_MS)
@@ -238,7 +226,7 @@ class WebRtcCore(private val ctx: Context) {
                         lastEnergy = null; lastDuration = null
                         restartStatsTimer()
 
-                        d("PC CONNECTED: clients=$n, pending=${pendingPeerCount.get()} → stats=ON")
+                        d("PC CONNECTED: clients=$n, pending=${pendingPeerCount.get()} → stats=ON; α=${"%.2f".format(lastMixerAlpha)}")
                     }
                     PeerConnection.IceConnectionState.CLOSED,
                     PeerConnection.IceConnectionState.FAILED,
@@ -367,7 +355,7 @@ class WebRtcCore(private val ctx: Context) {
                         shownLevel01 = 0.0
                         SignalLevel.post(0)
                         lastEnergy = null; lastDuration = null
-                        maybeVerbose("stats: muted → level 0")
+                        maybeVerbose("stats: muted → level 0; α=${"%.2f".format(lastMixerAlpha)}")
                         return
                     }
                     try {
@@ -427,8 +415,8 @@ class WebRtcCore(private val ctx: Context) {
                             }
 
                             maybeVerbose(
-                                "stats(real): hasOut=$sawOutbound hasSrc=$sawMediaSource inst=" +
-                                    (instLevel01?.let { "%.2f".format(it) } ?: "null")
+                                "stats(real): inst=" + (instLevel01?.let { "%.2f".format(it) } ?: "null") +
+                                    " α=${"%.2f".format(lastMixerAlpha)}"
                             )
 
                             val target = (instLevel01 ?: 0.0).coerceIn(0.0, 1.0)

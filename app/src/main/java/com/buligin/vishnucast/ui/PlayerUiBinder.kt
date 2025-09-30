@@ -13,11 +13,8 @@ import androidx.lifecycle.Observer
 import com.buligin.vishnucast.R
 import com.buligin.vishnucast.audio.PlayerCore
 import com.buligin.vishnucast.audio.PlaylistStore
+import com.buligin.vishnucast.service.MixerState
 
-/**
- * Ненавязчиво встраивает PlayerCore в существующий экран.
- * НИКАК не трогает остальной код MainActivity.
- */
 class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventObserver {
 
     private val app get() = activity.applicationContext
@@ -32,6 +29,9 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
     private var tvNow: TextView? = null
     private var tvDur: TextView? = null
     private var tvTitle: TextView? = null
+
+    // MIXER: crossfader
+    private var cross: SeekBar? = null
 
     private val uiHandler = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
@@ -57,13 +57,10 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         if (startIndex != null && startIndex in list.indices) {
             player.setPlaylist(list, startIndex)
             player.pause()
-            player.seekTo(0L) // остаёмся на паузе в начале трека
+            player.seekTo(0L) // остаёмся на паузе
         } else {
             player.setPlaylist(list, player.currentIndex().coerceAtLeast(0))
         }
-
-
-
     }
 
     fun attach(root: View = activity.findViewById(android.R.id.content)): PlayerUiBinder {
@@ -73,7 +70,7 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
             it.setPlaylist(playlistStore.load())
         }
 
-        // Привязка вьюх (если панель присутствует в разметке)
+        // Привязка вьюх
         tvTitle = root.findViewById(R.id.playerTitle)
         btnPrev = root.findViewById(R.id.playerPrev)
         btnPlayPause = root.findViewById(R.id.playerPlayPause)
@@ -81,8 +78,8 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         seek = root.findViewById(R.id.playerSeek)
         tvNow = root.findViewById(R.id.playerNow)
         tvDur = root.findViewById(R.id.playerDur)
+        cross = root.findViewById(R.id.mixCrossfader) // MIXER
 
-        // Если панель отсутствует — выходим тихо, не мешаем экрану
         if (btnPlayPause == null || seek == null) return this
 
         // Начальное состояние enable/disable
@@ -91,34 +88,47 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         btnPrev?.setOnClickListener {
             if (playlistStore.load().isNotEmpty()) {
                 player.previous()
-                player.play()
+                // оставляем на паузе — единообразно с тапом по элементу
+                player.pause(); player.seekTo(0L)
             }
         }
         btnNext?.setOnClickListener {
             if (playlistStore.load().isNotEmpty()) {
                 player.next()
-                player.play()
+                player.pause(); player.seekTo(0L)
             }
         }
 
         btnPlayPause?.setOnClickListener { player.toggle() }
-
-        /* Долгий тап = STOP */
         btnPlayPause?.setOnLongClickListener {
-            player.pause()
-            player.seekTo(0L)
-            true
+            player.pause(); player.seekTo(0L); true
         }
 
         seek?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) player.seekTo(p.toLong()) }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+
+        // MIXER: кросс-фейдер — публикуем α и регулируем громкость плеера прямо сейчас (B1)
+        cross?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) player.seekTo(progress.toLong())
+                val a = (progress / 100f).coerceIn(0f, 1f)
+                MixerState.alpha01.postValue(a)
+                player.setVolume01(a) // временно как громкость плеера
+                // микрофон сейчас идёт в WebRTC как прежде; на B2 α пойдёт в реальный микшер
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
 
-        // Наблюдатели
+        // Подпишем α на случай внешних изменений (например, mute логика)
+        MixerState.alpha01.observe(activity, Observer { a ->
+            cross?.progress = (a * 100).toInt()
+            player.setVolume01(a)
+        })
+
+        // Наблюдатели плеера
         player.title.observe(activity, Observer { title ->
             tvTitle?.text = if (title.isNullOrBlank()) activity.getString(R.string.cast_player_title) else title
         })
@@ -135,10 +145,7 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
             tvDur?.text = formatMs(d)
         })
 
-        // Авто-тикер
         uiHandler.post(ticker)
-
-        // Следим за жизненным циклом, чтобы вовремя освободиться
         activity.lifecycle.addObserver(this)
         return this
     }
@@ -150,12 +157,8 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
     }
 
     override fun onStateChanged(source: androidx.lifecycle.LifecycleOwner, event: Lifecycle.Event) {
-        if (event == Lifecycle.Event.ON_DESTROY) {
-            release()
-        }
+        if (event == Lifecycle.Event.ON_DESTROY) release()
     }
-
-    // --- helpers ---
 
     private fun resetUiToDefaults() {
         tvTitle?.text = activity.getString(R.string.cast_player_title)

@@ -124,5 +124,9 @@
     <string name="cast_removed">Удалено</string>
 
 
+    <string name="cast_mix_mic">Микрофон</string>
+    <string name="cast_mix_player">Плеер</string>
+
+
 
 </resources>

@@ -8,13 +8,18 @@ import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.Player
+import com.google.android.exoplayer2.audio.AudioProcessor
 
 class PlayerCore(context: Context) {
 
     private val app: Context = context.applicationContext
-    private val exo: ExoPlayer = ExoPlayer.Builder(app).build().apply {
-        repeatMode = Player.REPEAT_MODE_OFF
-    }
+    private val tee = ExoTeeAudioProcessor()
+
+    private val exo: ExoPlayer = ExoPlayer.Builder(app)
+        .setAudioProcessors(listOf<AudioProcessor>(tee))
+        .build().apply {
+            repeatMode = Player.REPEAT_MODE_OFF
+        }
 
     private val _isPlaying = MutableLiveData(false)
     val isPlaying: LiveData<Boolean> = _isPlaying
@@ -36,7 +41,6 @@ class PlayerCore(context: Context) {
                 _positionMs.postValue(player.currentPosition)
                 _title.postValue(player.currentMediaItem?.mediaMetadata?.title?.toString() ?: "")
             }
-
             override fun onPlayerError(error: PlaybackException) {
                 _isPlaying.postValue(false)
             }
@@ -46,9 +50,9 @@ class PlayerCore(context: Context) {
     fun setPlaylist(items: List<PlaylistItem>, startIndex: Int = 0) {
         exo.stop()
         exo.clearMediaItems()
-
         val mediaItems: List<MediaItem> = items.sortedBy { it.sort }.map { it.toMediaItem() }
-        exo.setMediaItems(mediaItems, startIndex.coerceIn(0, mediaItems.lastIndex.coerceAtLeast(0)), 0L)
+        val start = mediaItems.indices.takeIf { it.isNotEmpty() }?.let { startIndex.coerceIn(it.first, it.last) } ?: 0
+        exo.setMediaItems(mediaItems, start, 0L)
         exo.prepare()
     }
 
@@ -58,10 +62,8 @@ class PlayerCore(context: Context) {
     fun seekTo(ms: Long) = exo.seekTo(ms.coerceAtLeast(0L))
     fun next() = exo.seekToNextMediaItem()
     fun previous() = exo.seekToPreviousMediaItem()
-
     fun currentIndex(): Int = exo.currentMediaItemIndex
     fun setVolume01(v: Float) { exo.volume = v.coerceIn(0f, 1f) }
-
     fun release() { exo.release() }
 
     /** Обновлять из UI таймером ~раз в 500 мс */

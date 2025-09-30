@@ -8,11 +8,17 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.buligin.vishnucast.audio.PlayerCore
+import com.buligin.vishnucast.audio.PlaylistStore
 
 class CastService : Service() {
 
     private var server: VishnuServer? = null
     private var isFgShown: Boolean = false // флаг: уведомление реально запущено через startForeground
+
+    // --- Player в сервисе (B1): живёт столько же, сколько сервис ---
+    private lateinit var player: PlayerCore
+    private lateinit var playlistStore: PlaylistStore
 
     override fun onCreate() {
         super.onCreate()
@@ -23,6 +29,12 @@ class CastService : Service() {
 
         // Поднять HTTP/WS сразу
         startHttpWsIfNeeded()
+
+        // Инициализировать плеер (B1): плейлист подтягиваем из хранилища
+        playlistStore = PlaylistStore(this)
+        player = PlayerCore(this).also {
+            it.setPlaylist(playlistStore.load())
+        }
 
         // Mute по умолчанию
         applyMute(true)
@@ -76,6 +88,8 @@ class CastService : Service() {
         isRunning = false
         try { server?.shutdown() } catch (_: Throwable) {}
         server = null
+        // Освободить плеер (B1)
+        runCatching { if (this::player.isInitialized) player.release() }
         try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
         super.onDestroy()
     }
@@ -123,13 +137,6 @@ class CastService : Service() {
         }
         val piOpen = PendingIntent.getActivity(this, 0, openIntent, pendingFlags())
 
-        // Кнопка "Выход" — открывает Activity с ACTION_EXIT_NOW (без broadcast)
-//        val exitIntent = Intent(this, MainActivity::class.java).apply {
-//            action = ACTION_EXIT_NOW
-//            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-//        }
-//        val piExit = PendingIntent.getActivity(this, 10, exitIntent, pendingFlags())
-
         val muted = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MUTED, true)
         val text = if (muted) getString(R.string.cast_stopped) else getString(R.string.cast_running)
 
@@ -141,7 +148,6 @@ class CastService : Service() {
             .setOngoing(true) // делает уведомление несмахиваемым
             .setAutoCancel(false)
             .setCategory(Notification.CATEGORY_SERVICE)
-           // .addAction(0, getString(R.string.action_exit), piExit)
 
         // Сделать показ foreground-уведомления немедленным (API 31+, совместимо через compat)
         b.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
