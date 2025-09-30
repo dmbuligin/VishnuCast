@@ -51,6 +51,10 @@ import android.widget.Button
 import android.widget.ImageButton
 import android.view.MotionEvent
 import android.view.ViewConfiguration
+import com.buligin.vishnucast.ui.PlaylistActivity
+
+
+
 
 // === ДОБАВЛЕНО: для управляемого обновления ===
 import com.buligin.vishnucast.update.UpdateManager
@@ -318,6 +322,15 @@ class MainActivity : AppCompatActivity() {
         R.id.action_check_updates -> { checkForUpdates(); true }
         R.id.action_about -> { startActivity(Intent(this, AboutActivity::class.java)); true }
         R.id.action_refresh -> { refreshNetworkUi(); true }
+
+        R.id.action_open_playlist -> {
+            startActivity(Intent(this, PlaylistActivity::class.java))
+            true
+        }
+
+
+
+
         else -> super.onOptionsItemSelected(item)
     }
 
