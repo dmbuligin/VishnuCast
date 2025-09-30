@@ -19,8 +19,9 @@
         android:layout_height="wrap_content"
         android:contentDescription="@string/cast_add"
         app:srcCompat="@drawable/ic_add_24"
+        app:layout_anchor="@id/playlistRecycler"
         app:layout_anchorGravity="bottom|end"
-        app:layout_anchor="@id/playlistRoot"
         android:layout_margin="16dp"/>
+
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
