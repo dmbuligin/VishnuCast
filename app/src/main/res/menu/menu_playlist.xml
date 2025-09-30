@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_clear"
+        android:title="@string/cast_clear"
+        android:icon="@drawable/ic_clear_all_24"
+        android:showAsAction="ifRoom"/>
+</menu>
