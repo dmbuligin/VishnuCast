@@ -67,7 +67,17 @@ class PlaylistActivity : AppCompatActivity() {
 
         val fab = findViewById<FloatingActionButton>(R.id.playlistAddFab)
         fab.setOnClickListener {
-            pickAudio.launch(arrayOf("audio/*", "application/ogg"))
+            pickAudio.launch(arrayOf(
+                "audio/*",
+                "audio/mpeg", "audio/mp3", "audio/x-mpeg",
+                "audio/aac",
+                "audio/flac",
+                "audio/wav", "audio/x-wav",
+                "audio/ogg", "application/ogg",
+                "audio/webm",
+                "audio/mp4",
+                "audio/3gpp"
+            ))
         }
 
         // Drag & drop reorder
