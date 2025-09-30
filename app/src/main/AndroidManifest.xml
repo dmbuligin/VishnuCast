@@ -29,6 +29,13 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
 
+    <!-- A: чтение аудиофайлов через SAF/MediaStore -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Для устройств ≤ Android 12 -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+
+
 
     <application
         android:name=".App"
@@ -87,7 +94,10 @@
         </provider>
 
 
-
+        <activity
+            android:name=".ui.PlaylistActivity"
+            android:exported="false"
+            android:label="@string/cast_playlist_title" />
 
 
 

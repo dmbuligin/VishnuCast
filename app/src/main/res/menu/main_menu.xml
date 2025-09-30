@@ -2,6 +2,12 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
+    <item
+        android:id="@+id/action_open_playlist"
+        android:title="@string/cast_playlist_title"
+        android:icon="@drawable/ic_queue_music_24"
+        android:showAsAction="never" />
+
 
     <item
         android:id="@+id/action_refresh"
