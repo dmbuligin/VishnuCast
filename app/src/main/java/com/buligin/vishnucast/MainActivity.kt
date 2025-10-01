@@ -52,6 +52,11 @@ import android.widget.ImageButton
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import com.buligin.vishnucast.ui.PlaylistActivity
+import android.content.ComponentName
+import android.content.ServiceConnection
+import android.os.IBinder
+import com.buligin.vishnucast.CastService
+
 
 
 
@@ -67,6 +72,12 @@ class MainActivity : AppCompatActivity() {
         private const val PREFS_NAME = "vishnucast_prefs"
         private const val KEY_APP_LANG = "app_lang" // "ru" | "en"
     }
+
+
+
+    private var serviceConnection: ServiceConnection? = null
+    private var serviceBound = false
+
 
     private lateinit var btnExit: ImageButton
 
@@ -93,6 +104,39 @@ class MainActivity : AppCompatActivity() {
         override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { updateInputBadge() }
         override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) { updateInputBadge() }
     }
+
+
+    private fun bindCastService() {
+        if (serviceBound && serviceConnection != null) return
+
+        serviceConnection = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                val lb = binder as? CastService.LocalBinder ?: return
+                val svc = lb.service
+                serviceBound = true
+                // Пробрасываем сервис в плеерный биндер (если он уже прикреплён к вьюхам)
+                playerUiBinder?.onServiceConnected(svc)
+            }
+            override fun onServiceDisconnected(name: ComponentName?) {
+                serviceBound = false
+            }
+        }
+
+        // BIND_AUTO_CREATE поднимет сервис при необходимости
+        try {
+            bindService(Intent(this, CastService::class.java), serviceConnection!!, Context.BIND_AUTO_CREATE)
+        } catch (_: Throwable) { /* no-op */ }
+    }
+
+    private fun unbindCastService() {
+        if (!serviceBound || serviceConnection == null) return
+        try { unbindService(serviceConnection!!) } catch (_: Throwable) {}
+        serviceBound = false
+    }
+
+
+
+
 
     private fun isUsbMicConnected(): Boolean {
         val inputs = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
@@ -301,15 +345,21 @@ class MainActivity : AppCompatActivity() {
             playerUiBinder = com.buligin.vishnucast.ui.PlayerUiBinder(this).attach()
         }
 
-
+        bindCastService()
     }
 
     override fun onStop() {
-        super.onStop()
+
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         arrowHint.stopHint()
         hideArrowHint()
 
+        if (serviceBound && serviceConnection != null) {
+            try { unbindService(serviceConnection!!) } catch (_: Throwable) {}
+            serviceBound = false
+        }
+        unbindCastService()
+        super.onStop()
     }
 
     // ===== Menu =====

@@ -44,6 +44,25 @@ class CastService : Service() {
         playlistInitialized = true
     }
 
+    /** Перечитать плейлист из PlaylistStore и (опц.) перейти на индекс.
+     *  Ничего не автозапускаем: старт по кнопке ▶ в UI.
+     */
+    fun refreshPlaylistFromStore(playIndex: Int? = null, autoPlay: Boolean = false) {
+        val items = playlistStore.load()
+        player.setPlaylist(items)
+        playlistInitialized = true
+        if (playIndex != null && playIndex in items.indices) {
+            player.playIndex(playIndex)
+            if (!autoPlay) {
+                player.pause()
+                player.seekTo(0L)
+            }
+        }
+    }
+
+
+
+
     fun playerCore(): PlayerCore = player
 
 
