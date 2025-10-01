@@ -18,14 +18,35 @@ class CastService : Service() {
     private var isFgShown: Boolean = false
 
     // --- Player в сервисе ---
-    //private lateinit var player: PlayerCore
-    //private lateinit var playlistStore: PlaylistStore
+    private lateinit var player: PlayerCore
+    private lateinit var playlistStore: PlaylistStore
+    private var playlistInitialized: Boolean = false
+
 
     // --- Binder для UI ---
     inner class LocalBinder : Binder() {
         val service: CastService get() = this@CastService
+        fun getPlayer(): PlayerCore = player
+        fun isPlaylistInitialized(): Boolean = playlistInitialized
     }
     private val binder = LocalBinder()
+
+
+    /** Однократно инициализирует плейлист в сервисе. Без автозапуска. */
+    fun ensurePlaylistInitialized(startIndex: Int = 0) {
+        if (playlistInitialized) return
+        val items = playlistStore.load()
+        player.setPlaylist(items)
+        if (startIndex in items.indices) {
+            player.playIndex(startIndex)
+            player.pause() // остаёмся на паузе
+        }
+        playlistInitialized = true
+    }
+
+    fun playerCore(): PlayerCore = player
+
+
 
     override fun onCreate() {
         super.onCreate()
@@ -33,8 +54,8 @@ class CastService : Service() {
         startAsForeground(withMicType = false)
         startHttpWsIfNeeded()
 
-        //playlistStore = PlaylistStore(this)
-        //player = PlayerCore(this).also { it.setPlaylist(playlistStore.load()) }
+        player = PlayerCore(applicationContext)
+        playlistStore = PlaylistStore(applicationContext)
 
         applyMute(true)
         isRunning = true
@@ -53,7 +74,7 @@ class CastService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
-   // fun playerCore(): PlayerCore? = if (this::player.isInitialized) player else null
+
 
     private fun performExit() {
         applyMute(true)
@@ -71,7 +92,7 @@ class CastService : Service() {
         isRunning = false
         try { server?.shutdown() } catch (_: Throwable) {}
         server = null
-       // runCatching { if (this::player.isInitialized) player.release() }
+        try { player.release() } catch (_: Throwable) {}
         try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
         super.onDestroy()
     }
@@ -182,5 +203,8 @@ class CastService : Service() {
             val i = Intent(ctx, CastService::class.java).setAction(ACTION_START)
             ContextCompat.startForegroundService(ctx, i)
         }
+
+
+
     }
 }
