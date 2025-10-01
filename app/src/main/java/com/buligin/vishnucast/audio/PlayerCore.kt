@@ -27,10 +27,11 @@ class PlayerCore(context: Context) {
             player.setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(com.google.android.exoplayer2.C.USAGE_MEDIA)
-                    .setContentType(com.google.android.exoplayer2.C.CONTENT_TYPE_MUSIC)
+                    .setContentType(com.google.android.exoplayer2.C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build(),
                 /* handleAudioFocus = */ false
             )
+
         }
 
 
