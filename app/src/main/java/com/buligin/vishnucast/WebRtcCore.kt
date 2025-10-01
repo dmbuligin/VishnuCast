@@ -21,6 +21,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import com.buligin.vishnucast.service.MixerState // B1: наблюдаем α
+import com.buligin.vishnucast.audio.MixerEngine   // 4.1: «сухой» прогон микса Mic+Player
 
 class WebRtcCore(private val ctx: Context) {
 
@@ -68,6 +69,29 @@ class WebRtcCore(private val ctx: Context) {
             .setUseHardwareAcousticEchoCanceler(false)
             .setUseHardwareNoiseSuppressor(false)
             .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+            // 4.1: лёгкий хук «после» передачи данных в native — только валидация микса, без влияния на тракт
+            .setSamplesReadyCallback(object : JavaAudioDeviceModule.SamplesReadyCallback {
+                override fun onWebRtcAudioRecordSamplesReady(samples: JavaAudioDeviceModule.AudioSamples?) {
+                    if (samples == null) return
+                    try {
+
+                        if (samples.audioFormat != AudioFormat.ENCODING_PCM_16BIT) return
+                        val mic: ShortArray = bytesLeToShorts(samples.data)
+
+
+                        val a = (MixerState.alpha01.value ?: 0f).coerceIn(0f, 1f)
+                        // Вычисляем смесь (Mono 48 kHz, длина = длине mic буфера)
+                        val mixed = MixerEngine.mixMicWithPlayer48kMono(mic, a)
+
+                        // Небольшая sanity-проверка форматов — логируем только при несоответствии
+                        if (mixed.size != mic.size || samples.sampleRate != 48000 || samples.channelCount != 1) {
+                            Log.w(TAG, "Mixer sanity: mic[${mic.size}] ${samples.sampleRate}Hz ch=${samples.channelCount} → mixed[${mixed.size}]")
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "mixMicWithPlayer48kMono error: ${t.message}")
+                    }
+                }
+            })
             .createAudioDeviceModule()
 
         val options = PeerConnectionFactory.Options().apply {
@@ -99,7 +123,7 @@ class WebRtcCore(private val ctx: Context) {
         SignalLevel.post(0)
         d("init: ADM & audioTrack ready, start muted; mixer α=${"%.2f".format(lastMixerAlpha)}")
 
-        // Подписка на изменения α (для логов/диагностики; B2 будет использоваться микшером)
+        // Подписка на изменения α (для логов/диагностики)
         MixerState.alpha01.observeForever { a ->
             lastMixerAlpha = a ?: 0f
         }
@@ -437,6 +461,25 @@ class WebRtcCore(private val ctx: Context) {
             }, 0L, tick)
         }
     }
+
+    private fun bytesLeToShorts(src: ByteArray): ShortArray {
+        val n = src.size / 2
+        val out = ShortArray(n)
+        var bi = 0
+        var i = 0
+        while (i < n) {
+            val lo = src[bi].toInt() and 0xFF
+            val hi = src[bi + 1].toInt() // знак учитываем при сдвиге
+            out[i] = ((hi shl 8) or lo).toShort() // little-endian → short
+            i++
+            bi += 2
+        }
+        return out
+    }
+
+
+
+
 
     companion object {
         @Volatile var LEVEL_TICK_MS: Int = 120
