@@ -20,8 +20,9 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
-import com.buligin.vishnucast.service.MixerState // B1: наблюдаем α
-import com.buligin.vishnucast.audio.MixerEngine   // 4.1: «сухой» прогон микса Mic+Player
+import com.buligin.vishnucast.service.MixerState               // B1: наблюдаем α
+import com.buligin.vishnucast.audio.MixerEngine               // 4.1: «сухой» прогон микса Mic+Player
+import com.buligin.vishnucast.audio.MixedAudioDeviceModule    // 4.2: каркас Mixed ADM (делегат)
 
 class WebRtcCore(private val ctx: Context) {
 
@@ -60,39 +61,11 @@ class WebRtcCore(private val ctx: Context) {
     }
 
     init {
-        // Глобальная страховка: инициализируем WebRTC один раз на процесс,
-        // даже если по какой-то причине App.onCreate() не успел.
+        // Однократная safe-инициализация WebRTC
         WebRtcInit.ensure(ctx.applicationContext)
 
-        // ADM: VOICE_RECOGNITION, HW AEC/NS off — «золотой» профиль
-        adm = JavaAudioDeviceModule.builder(ctx)
-            .setUseHardwareAcousticEchoCanceler(false)
-            .setUseHardwareNoiseSuppressor(false)
-            .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-            // 4.1: лёгкий хук «после» передачи данных в native — только валидация микса, без влияния на тракт
-            .setSamplesReadyCallback(object : JavaAudioDeviceModule.SamplesReadyCallback {
-                override fun onWebRtcAudioRecordSamplesReady(samples: JavaAudioDeviceModule.AudioSamples?) {
-                    if (samples == null) return
-                    try {
-
-                        if (samples.audioFormat != AudioFormat.ENCODING_PCM_16BIT) return
-                        val mic: ShortArray = bytesLeToShorts(samples.data)
-
-
-                        val a = (MixerState.alpha01.value ?: 0f).coerceIn(0f, 1f)
-                        // Вычисляем смесь (Mono 48 kHz, длина = длине mic буфера)
-                        val mixed = MixerEngine.mixMicWithPlayer48kMono(mic, a)
-
-                        // Небольшая sanity-проверка форматов — логируем только при несоответствии
-                        if (mixed.size != mic.size || samples.sampleRate != 48000 || samples.channelCount != 1) {
-                            Log.w(TAG, "Mixer sanity: mic[${mic.size}] ${samples.sampleRate}Hz ch=${samples.channelCount} → mixed[${mixed.size}]")
-                        }
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "mixMicWithPlayer48kMono error: ${t.message}")
-                    }
-                }
-            })
-            .createAudioDeviceModule()
+        // Создаём ADM через фабричную функцию — с учетом флага Mix 2.0
+        adm = buildAudioDeviceModule(ctx)
 
         val options = PeerConnectionFactory.Options().apply {
             disableNetworkMonitor = true // «золотой» флаг
@@ -121,7 +94,7 @@ class WebRtcCore(private val ctx: Context) {
         adm.setMicrophoneMute(true)
         muted.set(true)
         SignalLevel.post(0)
-        d("init: ADM & audioTrack ready, start muted; mixer α=${"%.2f".format(lastMixerAlpha)}")
+        d("init: ADM & audioTrack ready, start muted; mixer α=${"%.2f".format(lastMixerAlpha)} (mix2=${MIX20_ENABLED})")
 
         // Подписка на изменения α (для логов/диагностики)
         MixerState.alpha01.observeForever { a ->
@@ -129,6 +102,70 @@ class WebRtcCore(private val ctx: Context) {
         }
 
         startGuardTimer()
+    }
+
+    /** Фабрика ADM с учётом флага Mix 2.0. Пока MixedADM делегирует в JavaADM (поведение не меняется). */
+    private fun buildAudioDeviceModule(appContext: Context): JavaAudioDeviceModule {
+        // Общий SamplesReadyCallback — валидация микса (без подмены звука)
+        val samplesCb = object : JavaAudioDeviceModule.SamplesReadyCallback {
+            override fun onWebRtcAudioRecordSamplesReady(samples: JavaAudioDeviceModule.AudioSamples?) {
+                if (samples == null) return
+                try {
+                    if (samples.audioFormat != AudioFormat.ENCODING_PCM_16BIT) return
+                    val mic: ShortArray = bytesLeToShorts(samples.data)
+                    val a = (MixerState.alpha01.value ?: 0f).coerceIn(0f, 1f)
+
+                    // Вычисляем смесь (Mono 48 kHz, длина = длине mic буфера)
+                    val mixed = MixerEngine.mixMicWithPlayer48kMono(mic, a)
+
+                    // Sanity-проверка форматов — логируем только при несоответствии
+                    if (mixed.size != mic.size || samples.sampleRate != 48000 || samples.channelCount != 1) {
+                        Log.w(TAG, "Mixer sanity: mic[${mic.size}] ${samples.sampleRate}Hz ch=${samples.channelCount} → mixed[${mixed.size}]")
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "mixMicWithPlayer48kMono error: ${t.message}")
+                }
+            }
+        }
+
+        return if (MIX20_ENABLED) {
+            // Каркас MixedADM (делегирует в JavaADM). Позже здесь включим JNI-подмену буфера.
+            MixedAudioDeviceModule.builder(appContext)
+                .setUseHardwareAcousticEchoCanceler(false)
+                .setUseHardwareNoiseSuppressor(false)
+                .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+                .setUseStereoInput(false)
+                .setUseStereoOutput(false)
+                .setSamplesReadyCallback(samplesCb)
+                .createAudioDeviceModule()
+                .asJavaModule()
+        } else {
+            // Обычный JavaADM (как раньше)
+            JavaAudioDeviceModule.builder(appContext)
+                .setUseHardwareAcousticEchoCanceler(false)
+                .setUseHardwareNoiseSuppressor(false)
+                .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+                .setUseStereoInput(false)
+                .setUseStereoOutput(false)
+                .setSamplesReadyCallback(samplesCb)
+                .createAudioDeviceModule()
+        }
+    }
+
+    // Конвертер ByteArray(LE, PCM16) → ShortArray
+    private fun bytesLeToShorts(src: ByteArray): ShortArray {
+        val n = src.size / 2
+        val out = ShortArray(n)
+        var bi = 0
+        var i = 0
+        while (i < n) {
+            val lo = src[bi].toInt() and 0xFF
+            val hi = src[bi + 1].toInt() // знак учитываем при сдвиге
+            out[i] = ((hi shl 8) or lo).toShort() // little-endian → short
+            i++
+            bi += 2
+        }
+        return out
     }
 
     private fun startGuardTimer() {
@@ -149,8 +186,7 @@ class WebRtcCore(private val ctx: Context) {
         val pending = pendingPeerCount.get()
         val hasActiveOrPending = (clients + pending) > 0
 
-        // B1: лёгкий heartbeat α, чтобы видеть связку UI↔CORE
-        maybeVerbose("guard: muted=$isMuted clients=$clients pending=$pending α=${"%.2f".format(lastMixerAlpha)}")
+        maybeVerbose("guard: muted=$isMuted clients=$clients pending=$pending α=${"%.2f".format(lastMixerAlpha)} mix2=$MIX20_ENABLED")
 
         if (isMuted) {
             if (probeRunning) { probe.stop(); d("guard: stopped probe (muted)") }
@@ -202,7 +238,7 @@ class WebRtcCore(private val ctx: Context) {
             probe.stop()
             d("setMuted: ON → level=0, probe stop")
         } else {
-            d("setMuted: OFF (mixer α=${"%.2f".format(lastMixerAlpha)})")
+            d("setMuted: OFF (mixer α=${"%.2f".format(lastMixerAlpha)} mix2=$MIX20_ENABLED)")
             if (connectedPeerCount.get() == 0) {
                 probe.setRelease(LEVEL_RELEASE_PER_SEC)
                 probe.setTickMs(LEVEL_TICK_MS)
@@ -250,7 +286,7 @@ class WebRtcCore(private val ctx: Context) {
                         lastEnergy = null; lastDuration = null
                         restartStatsTimer()
 
-                        d("PC CONNECTED: clients=$n, pending=${pendingPeerCount.get()} → stats=ON; α=${"%.2f".format(lastMixerAlpha)}")
+                        d("PC CONNECTED: clients=$n, pending=${pendingPeerCount.get()} → stats=ON; α=${"%.2f".format(lastMixerAlpha)} mix2=$MIX20_ENABLED")
                     }
                     PeerConnection.IceConnectionState.CLOSED,
                     PeerConnection.IceConnectionState.FAILED,
@@ -379,7 +415,7 @@ class WebRtcCore(private val ctx: Context) {
                         shownLevel01 = 0.0
                         SignalLevel.post(0)
                         lastEnergy = null; lastDuration = null
-                        maybeVerbose("stats: muted → level 0; α=${"%.2f".format(lastMixerAlpha)}")
+                        maybeVerbose("stats: muted → level 0; α=${"%.2f".format(lastMixerAlpha)} mix2=$MIX20_ENABLED")
                         return
                     }
                     try {
@@ -388,15 +424,11 @@ class WebRtcCore(private val ctx: Context) {
                             var energy: Double? = null
                             var dur: Double? = null
 
-                            var sawOutbound = false
-                            var sawMediaSource = false
-
                             report.statsMap?.values?.forEach { s ->
                                 if (s.type == "outbound-rtp") {
                                     val mediaType = (s.members["mediaType"] as? String)
                                         ?: (s.members["kind"] as? String)
                                     if (mediaType == null || mediaType == "audio") {
-                                        sawOutbound = true
                                         energy = (s.members["totalAudioEnergy"] as? Double)
                                             ?: (s.members["total_audio_energy"] as? Double)
                                         dur = (s.members["totalSamplesDuration"] as? Double)
@@ -412,7 +444,6 @@ class WebRtcCore(private val ctx: Context) {
                                         val mediaType = (s.members["mediaType"] as? String)
                                             ?: (s.members["kind"] as? String)
                                         if (mediaType == null || mediaType == "audio") {
-                                            sawMediaSource = sawMediaSource || s.type.startsWith("media") || s.type == "track" || s.type == "ssrc"
                                             lv = (s.members["audioLevel"] as? Double)
                                                 ?: (s.members["audio_level"] as? Double)
                                                     ?: ((s.members["audioInputLevel"] as? Number)?.toDouble()?.let { it / 32767.0 })
@@ -440,7 +471,7 @@ class WebRtcCore(private val ctx: Context) {
 
                             maybeVerbose(
                                 "stats(real): inst=" + (instLevel01?.let { "%.2f".format(it) } ?: "null") +
-                                    " α=${"%.2f".format(lastMixerAlpha)}"
+                                    " α=${"%.2f".format(lastMixerAlpha)} mix2=$MIX20_ENABLED"
                             )
 
                             val target = (instLevel01 ?: 0.0).coerceIn(0.0, 1.0)
@@ -462,29 +493,14 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
-    private fun bytesLeToShorts(src: ByteArray): ShortArray {
-        val n = src.size / 2
-        val out = ShortArray(n)
-        var bi = 0
-        var i = 0
-        while (i < n) {
-            val lo = src[bi].toInt() and 0xFF
-            val hi = src[bi + 1].toInt() // знак учитываем при сдвиге
-            out[i] = ((hi shl 8) or lo).toShort() // little-endian → short
-            i++
-            bi += 2
-        }
-        return out
-    }
-
-
-
-
-
     companion object {
         @Volatile var LEVEL_TICK_MS: Int = 120
         @Volatile var LEVEL_RELEASE_PER_SEC: Double = 1.50
         @Volatile var LOG_ENABLED: Boolean = true
+
+        /** Флаг каркаса Mix 2.0. Сейчас поведение не меняет (MixedADM делегирует в JavaADM). */
+        @Volatile var MIX20_ENABLED: Boolean = false
+
         private const val TAG = "VishnuCast"
     }
 
