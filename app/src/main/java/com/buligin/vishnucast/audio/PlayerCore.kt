@@ -8,6 +8,8 @@ import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.Player
+import com.google.android.exoplayer2.audio.AudioAttributes
+
 
 class PlayerCore(context: Context) {
 
@@ -16,9 +18,24 @@ class PlayerCore(context: Context) {
 
     private val exo: ExoPlayer = ExoPlayer.Builder(app)
         .setRenderersFactory(TeeRenderersFactory(app, arrayOf(tee)))
-        .build().apply {
+        .build()
+        .apply {
             repeatMode = Player.REPEAT_MODE_OFF
         }
+        .also { player ->
+            // Явные атрибуты звука (MEDIA/MUSIC), чтобы воспроизведение стартовало корректно на всех OEM
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(com.google.android.exoplayer2.C.USAGE_MEDIA)
+                    .setContentType(com.google.android.exoplayer2.C.CONTENT_TYPE_MUSIC)
+                    .build(),
+                /* handleAudioFocus = */ false
+            )
+        }
+
+
+
+
 
     private val _isPlaying = MutableLiveData(false)
     val isPlaying: LiveData<Boolean> = _isPlaying

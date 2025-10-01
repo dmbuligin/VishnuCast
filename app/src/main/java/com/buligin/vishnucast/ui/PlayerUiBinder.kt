@@ -54,7 +54,8 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
             hookPlayerObservers()
             syncControlsEnabled()
             // подтянуть текущий плейлист (на случай, если обновился пока были в фоне)
-            player?.let { it.setPlaylist(playlistStore.load(), it.currentIndex().coerceAtLeast(0)) }
+          //  player?.let { it.setPlaylist(playlistStore.load(), it.currentIndex().coerceAtLeast(0)) }
+            // Удален лишний setPlaylist нахуй
         }
         override fun onServiceDisconnected(name: ComponentName?) {
             unhookPlayerObservers()
