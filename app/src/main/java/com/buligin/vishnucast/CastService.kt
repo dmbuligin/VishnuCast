@@ -18,8 +18,8 @@ class CastService : Service() {
     private var isFgShown: Boolean = false
 
     // --- Player в сервисе ---
-    private lateinit var player: PlayerCore
-    private lateinit var playlistStore: PlaylistStore
+    //private lateinit var player: PlayerCore
+    //private lateinit var playlistStore: PlaylistStore
 
     // --- Binder для UI ---
     inner class LocalBinder : Binder() {
@@ -33,8 +33,8 @@ class CastService : Service() {
         startAsForeground(withMicType = false)
         startHttpWsIfNeeded()
 
-        playlistStore = PlaylistStore(this)
-        player = PlayerCore(this).also { it.setPlaylist(playlistStore.load()) }
+        //playlistStore = PlaylistStore(this)
+        //player = PlayerCore(this).also { it.setPlaylist(playlistStore.load()) }
 
         applyMute(true)
         isRunning = true
@@ -53,7 +53,7 @@ class CastService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
-    fun playerCore(): PlayerCore? = if (this::player.isInitialized) player else null
+   // fun playerCore(): PlayerCore? = if (this::player.isInitialized) player else null
 
     private fun performExit() {
         applyMute(true)
@@ -71,7 +71,7 @@ class CastService : Service() {
         isRunning = false
         try { server?.shutdown() } catch (_: Throwable) {}
         server = null
-        runCatching { if (this::player.isInitialized) player.release() }
+       // runCatching { if (this::player.isInitialized) player.release() }
         try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
         super.onDestroy()
     }

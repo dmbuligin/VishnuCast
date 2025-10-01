@@ -1,11 +1,6 @@
 package com.buligin.vishnucast.ui
 
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
 import android.os.Handler
-import android.os.IBinder
 import android.os.Looper
 import android.view.View
 import android.widget.ImageButton
@@ -15,25 +10,19 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.Observer
-import com.buligin.vishnucast.CastService
 import com.buligin.vishnucast.R
 import com.buligin.vishnucast.audio.PlayerCore
 import com.buligin.vishnucast.audio.PlaylistStore
 import com.buligin.vishnucast.service.MixerState
-import android.util.Log
 
-
-
-
+/**
+ * Рабочая версия: плеер живёт в UI (без сервиса), без Tee.
+ */
 class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventObserver {
-
-    private val TAG = "VC/PlayerUi"
-
 
     private val app get() = activity.applicationContext
 
-    private var service: CastService? = null
-    private var player: PlayerCore? = null
+    private lateinit var player: PlayerCore
     private lateinit var playlistStore: PlaylistStore
 
     private var btnPrev: ImageButton? = null
@@ -43,69 +32,47 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
     private var tvNow: TextView? = null
     private var tvDur: TextView? = null
     private var tvTitle: TextView? = null
+
+    // кросс-фейдер оставим в UI (B1-поведение: управляет громкостью плеера)
     private var cross: SeekBar? = null
 
     private val uiHandler = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
         override fun run() {
-            player?.tick()
+            player.tick()
             uiHandler.postDelayed(this, 500L)
         }
     }
 
-    private val conn = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            Log.d(TAG, "onServiceConnected: player=${player != null}")
-
-            val b = binder as? CastService.LocalBinder ?: return
-            service = b.service
-            player = service?.playerCore()
-            hookPlayerObservers()
-            syncControlsEnabled()
-
-
-            // подтянуть текущий плейлист (на случай, если обновился пока были в фоне)
-          //  player?.let { it.setPlaylist(playlistStore.load(), it.currentIndex().coerceAtLeast(0)) }
-            // Удален лишний setPlaylist нахуй
-        }
-        override fun onServiceDisconnected(name: ComponentName?) {
-            unhookPlayerObservers()
-            service = null
-            player = null
-            syncControlsEnabled()
-        }
-    }
-
+    /** Перечитать playlist из хранилища и (опц.) загрузить трек по индексу (без автоплея) */
     fun reloadPlaylistAndPlay(startIndex: Int?) {
-
-
-        Log.d(TAG, "reloadPlaylistAndPlay: startIndex=$startIndex list=${playlistStore.load().size}")
-
-
-        val p = player ?: return
+        if (!this::player.isInitialized) return
         val list = playlistStore.load()
         val enabled = list.isNotEmpty()
         setControlsEnabled(enabled)
 
         if (!enabled) {
-            p.setPlaylist(list)
+            player.setPlaylist(list)
             resetUiToDefaults()
             return
         }
 
         if (startIndex != null && startIndex in list.indices) {
-            p.setPlaylist(list, startIndex)
-            // плеер после prepare будет в READY и на 0; дополнительно позиционируемся на начало без паузы
-            p.seekTo(0L)
+            player.setPlaylist(list, startIndex)
+            player.seekTo(0L) // остаёмся на паузе в начале
         } else {
-            p.setPlaylist(list, p.currentIndex().coerceAtLeast(0))
+            player.setPlaylist(list, player.currentIndex().coerceAtLeast(0))
         }
-
     }
 
     fun attach(root: View = activity.findViewById(android.R.id.content)): PlayerUiBinder {
+        // Инициализация core
         playlistStore = PlaylistStore(app)
+        player = PlayerCore(app).also {
+            it.setPlaylist(playlistStore.load())
+        }
 
+        // Привязка вьюх
         tvTitle = root.findViewById(R.id.playerTitle)
         btnPrev = root.findViewById(R.id.playerPrev)
         btnPlayPause = root.findViewById(R.id.playerPlayPause)
@@ -117,42 +84,63 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
 
         if (btnPlayPause == null || seek == null) return this
 
-        setControlsEnabled(false) // до подключения к сервису
+        setControlsEnabled(playlistStore.load().isNotEmpty())
 
         btnPrev?.setOnClickListener {
-            Log.d(TAG, "prev()"); player?.let { if (playlistStore.load().isNotEmpty()) { it.previous(); it.pause(); it.seekTo(0L) } }
+            if (playlistStore.load().isNotEmpty()) {
+                player.previous()
+                player.pause(); player.seekTo(0L)
+            }
         }
-
         btnNext?.setOnClickListener {
-            Log.d(TAG, "next()"); player?.let { if (playlistStore.load().isNotEmpty()) { it.next(); it.pause(); it.seekTo(0L) } }
+            if (playlistStore.load().isNotEmpty()) {
+                player.next()
+                player.pause(); player.seekTo(0L)
+            }
         }
 
-        btnPlayPause?.setOnClickListener { Log.d(TAG, "playPause()"); player?.toggle() }
-        btnPlayPause?.setOnLongClickListener { Log.d(TAG, "stop(longClick)"); player?.pause(); player?.seekTo(0L); true }
+        btnPlayPause?.setOnClickListener { player.toggle() }
+        btnPlayPause?.setOnLongClickListener { player.pause(); player.seekTo(0L); true }
 
         seek?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) player?.seekTo(p.toLong()) }
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) player.seekTo(progress.toLong())
+            }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
 
+        // B1: кросс-фейдер управляет громкостью плеера; α публикуем в MixerState для совместимости
         cross?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                 val a = (progress / 100f).coerceIn(0f, 1f)
                 MixerState.alpha01.postValue(a)
-                player?.setVolume01(a) // временно: громкость плеера
+                player.setVolume01(a)
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
         MixerState.alpha01.observe(activity, Observer { a ->
             cross?.progress = ((a ?: 0f) * 100).toInt()
-            player?.setVolume01(a ?: 0f)
+            player.setVolume01(a ?: 0f)
         })
 
-        // Подключаемся к сервису
-        val i = Intent(app, CastService::class.java)
-        app.bindService(i, conn, Context.BIND_AUTO_CREATE)
+        // Наблюдатели плеера
+        player.title.observe(activity, Observer { title ->
+            tvTitle?.text = if (title.isNullOrBlank()) activity.getString(R.string.cast_player_title) else title
+        })
+        player.isPlaying.observe(activity, Observer { playing ->
+            btnPlayPause?.setImageResource(if (playing == true) R.drawable.ic_pause_24 else R.drawable.ic_play_24)
+        })
+        player.positionMs.observe(activity, Observer { pos ->
+            seek?.progress = (pos ?: 0L).toInt()
+            tvNow?.text = formatMs(pos ?: 0L)
+        })
+        player.durationMs.observe(activity, Observer { dur ->
+            val d = (dur ?: 0L).coerceAtLeast(0L)
+            seek?.max = d.toInt()
+            tvDur?.text = formatMs(d)
+        })
 
         uiHandler.post(ticker)
         activity.lifecycle.addObserver(this)
@@ -161,42 +149,12 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
 
     fun release() {
         uiHandler.removeCallbacksAndMessages(null)
-        unhookPlayerObservers()
-        try { app.unbindService(conn) } catch (_: Throwable) {}
+        if (this::player.isInitialized) player.release()
         activity.lifecycle.removeObserver(this)
     }
 
     override fun onStateChanged(source: androidx.lifecycle.LifecycleOwner, event: Lifecycle.Event) {
         if (event == Lifecycle.Event.ON_DESTROY) release()
-    }
-
-    private fun hookPlayerObservers() {
-        val p = player ?: return
-        p.title.observe(activity, Observer { title ->
-            tvTitle?.text = if (title.isNullOrBlank()) activity.getString(R.string.cast_player_title) else title
-        })
-        p.isPlaying.observe(activity, Observer { playing ->
-            btnPlayPause?.setImageResource(if (playing == true) R.drawable.ic_pause_24 else R.drawable.ic_play_24)
-        })
-        p.positionMs.observe(activity, Observer { pos ->
-            seek?.progress = (pos ?: 0L).toInt()
-            tvNow?.text = formatMs(pos ?: 0L)
-        })
-        p.durationMs.observe(activity, Observer { dur ->
-            val d = (dur ?: 0L).coerceAtLeast(0L)
-            seek?.max = d.toInt()
-            tvDur?.text = formatMs(d)
-        })
-    }
-
-    private fun unhookPlayerObservers() {
-        // Жизненный цикл LiveData привязан к Activity, поэтому отписка не критична,
-        // но на всякий случай очистим локальные ссылки — и контролы заблокируем.
-        setControlsEnabled(false)
-    }
-
-    private fun syncControlsEnabled() {
-        setControlsEnabled(player != null && playlistStore.load().isNotEmpty())
     }
 
     private fun resetUiToDefaults() {
