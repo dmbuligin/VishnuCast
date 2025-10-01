@@ -42,7 +42,7 @@ android {
 
     val versionMajor = 2
     val versionMinor = 0
-    val versionPatch = 1
+    val versionPatch = 2
 
     // versionName = "1.7.0"
     val verName = "$versionMajor.$versionMinor.$versionPatch"
@@ -66,10 +66,28 @@ android {
         defaultConfig {
             vectorDrawables { useSupportLibrary = true }
         }
-
-
-
     }
+
+    defaultConfig {
+        // ...
+        externalNativeBuild {
+            cmake {
+                // На будущее можно выставлять дефайны через -D...
+            }
+        }
+        ndk {
+            // Сузим ABI под нужды (можно расширить при желании)
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
 
     buildFeatures {
         buildConfig = true
@@ -96,6 +114,13 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+
+
+
+
+
+
 }
 
 

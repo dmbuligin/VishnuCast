@@ -4,6 +4,11 @@ import android.content.Context
 import android.media.MediaRecorder
 import org.webrtc.audio.AudioDeviceModule
 import org.webrtc.audio.JavaAudioDeviceModule
+import android.util.Log
+import com.buligin.vishnucast.audio.VcMix
+
+
+
 
 /**
  * MixedAudioDeviceModule — каркас под Mix 2.0.
@@ -31,6 +36,9 @@ object MixedAudioDeviceModule {
 
         /** Возвращаем ИНТЕРФЕИС ADM — сейчас делегируем в JavaAudioDeviceModule. */
         fun createAudioDeviceModule(): AudioDeviceModule {
+            val jniOk = VcMix.isReady()
+            Log.i("VC/MixedADM", "JNI ready: $jniOk (delegating to JavaAudioDeviceModule)")
+
             return JavaAudioDeviceModule.builder(appContext)
                 .setUseHardwareAcousticEchoCanceler(useHwAec)
                 .setUseHardwareNoiseSuppressor(useHwNs)

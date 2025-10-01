@@ -98,7 +98,7 @@ class WebRtcCore(private val ctx: Context) {
         (adm as? JavaAudioDeviceModule)?.setMicrophoneMute(true)
         muted.set(true)
         SignalLevel.post(0)
-        d("init: ADM & audioTrack ready, start muted; mixer α=${"%.2f".format(lastMixerAlpha)} (mix2=${MIX20_ENABLED})")
+        d("init: ADM & audioTrack ready, start muted; mixer α=${"%.2f".format(lastMixerAlpha)} (mix2=${MIX20_ENABLED}, jni=${com.buligin.vishnucast.audio.VcMix.isReady()})")
 
         // Подписка на изменения α (для логов/диагностики)
         MixerState.alpha01.observeForever { a ->
