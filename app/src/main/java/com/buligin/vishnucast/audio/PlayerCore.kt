@@ -13,6 +13,8 @@ import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.audio.AudioAttributes
 import com.google.android.exoplayer2.MediaMetadata
+import com.buligin.vishnucast.audio.TeeRenderersFactory
+
 
 /**
  * Минимальный рабочий плеер без Tee/RenderersFactory.
@@ -38,7 +40,10 @@ class PlayerCore(context: Context) {
 
     private var tickerPosted = false
 
-    private val exo: ExoPlayer = ExoPlayer.Builder(app).build().apply {
+    private val exo: ExoPlayer = ExoPlayer.Builder(app)
+        .setRenderersFactory(TeeRenderersFactory(app))
+        .build()
+        .apply {
         repeatMode = Player.REPEAT_MODE_OFF
 
         // AudioAttributes: MEDIA/MUSIC + захват аудиофокуса и реакция на "becoming noisy"
