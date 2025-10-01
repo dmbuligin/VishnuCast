@@ -38,7 +38,7 @@ class PlayerCore(context: Context) {
                     .setUsage(com.google.android.exoplayer2.C.USAGE_MEDIA)
                     .setContentType(com.google.android.exoplayer2.C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build(),
-                /* handleAudioFocus = */ false
+                /* handleAudioFocus = */ true
             )
 
         }

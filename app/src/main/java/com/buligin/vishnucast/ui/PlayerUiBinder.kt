@@ -95,11 +95,12 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
 
         if (startIndex != null && startIndex in list.indices) {
             p.setPlaylist(list, startIndex)
-            p.pause()
-            p.seekTo(0L) // остаёмся на паузе
+            // плеер после prepare будет в READY и на 0; дополнительно позиционируемся на начало без паузы
+            p.seekTo(0L)
         } else {
             p.setPlaylist(list, p.currentIndex().coerceAtLeast(0))
         }
+
     }
 
     fun attach(root: View = activity.findViewById(android.R.id.content)): PlayerUiBinder {
