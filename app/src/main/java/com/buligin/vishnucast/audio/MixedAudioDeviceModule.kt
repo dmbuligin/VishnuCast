@@ -2,19 +2,17 @@ package com.buligin.vishnucast.audio
 
 import android.content.Context
 import android.media.MediaRecorder
+import org.webrtc.audio.AudioDeviceModule
 import org.webrtc.audio.JavaAudioDeviceModule
 
 /**
  * MixedAudioDeviceModule — каркас под Mix 2.0.
  *
- * Сейчас это аккуратная обёртка, полностью делегирующая в JavaAudioDeviceModule.
- * Позже здесь будет подключена JNI-реализация подмены входного буфера (Mic→Mix),
- * без смены публичного API и без правок в остальных классах.
+ * Сейчас это делегат на JavaAudioDeviceModule с тем же Builder-API.
+ * Позже внутри createAudioDeviceModule() будет вызов нативной (JNI) реализации,
+ * но сигнатуры и точки подключения останутся прежними.
  */
-class MixedAudioDeviceModule private constructor(
-    private val delegate: JavaAudioDeviceModule
-) {
-    fun asJavaModule(): JavaAudioDeviceModule = delegate
+object MixedAudioDeviceModule {
 
     class Builder internal constructor(private val appContext: Context) {
         private var useHwAec = false
@@ -29,16 +27,11 @@ class MixedAudioDeviceModule private constructor(
         fun setAudioSource(source: Int) = apply { audioSource = source }
         fun setUseStereoInput(enable: Boolean) = apply { stereoIn = enable }
         fun setUseStereoOutput(enable: Boolean) = apply { stereoOut = enable }
-
-        /** Колбэк оставляем — он полезен для валидации/диагностик. */
         fun setSamplesReadyCallback(cb: JavaAudioDeviceModule.SamplesReadyCallback?) = apply { samplesReadyCallback = cb }
 
-        /**
-         * Текущая реализация — чистый делегат на JavaAudioDeviceModule.
-         * Позже внутри этого метода добавим JNI-вставку с подменой буфера.
-         */
-        fun createAudioDeviceModule(): MixedAudioDeviceModule {
-            val j = JavaAudioDeviceModule.builder(appContext)
+        /** Возвращаем ИНТЕРФЕИС ADM — сейчас делегируем в JavaAudioDeviceModule. */
+        fun createAudioDeviceModule(): AudioDeviceModule {
+            return JavaAudioDeviceModule.builder(appContext)
                 .setUseHardwareAcousticEchoCanceler(useHwAec)
                 .setUseHardwareNoiseSuppressor(useHwNs)
                 .setAudioSource(audioSource)
@@ -46,11 +39,8 @@ class MixedAudioDeviceModule private constructor(
                 .setUseStereoOutput(stereoOut)
                 .setSamplesReadyCallback(samplesReadyCallback)
                 .createAudioDeviceModule()
-            return MixedAudioDeviceModule(j)
         }
     }
 
-    companion object {
-        fun builder(appContext: Context): Builder = Builder(appContext.applicationContext)
-    }
+    fun builder(appContext: Context): Builder = Builder(appContext.applicationContext)
 }

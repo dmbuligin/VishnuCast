@@ -23,6 +23,9 @@ import kotlin.math.sqrt
 import com.buligin.vishnucast.service.MixerState               // B1: наблюдаем α
 import com.buligin.vishnucast.audio.MixerEngine               // 4.1: «сухой» прогон микса Mic+Player
 import com.buligin.vishnucast.audio.MixedAudioDeviceModule    // 4.2: каркас Mixed ADM (делегат)
+import org.webrtc.audio.AudioDeviceModule
+
+
 
 class WebRtcCore(private val ctx: Context) {
 
@@ -30,7 +33,8 @@ class WebRtcCore(private val ctx: Context) {
     private var guardTimer: Timer? = null
 
     // Аудио-только: без EglBase и без видео-фабрик
-    private val adm: JavaAudioDeviceModule
+    //private val adm: JavaAudioDeviceModule
+    private val adm: org.webrtc.audio.AudioDeviceModule
     private val factory: PeerConnectionFactory
     private val audioSource: AudioSource
     private val audioTrack: AudioTrack
@@ -91,7 +95,7 @@ class WebRtcCore(private val ctx: Context) {
         audioTrack.setEnabled(true)
 
         // Стартуем в mute → «пустой поток»
-        adm.setMicrophoneMute(true)
+        (adm as? JavaAudioDeviceModule)?.setMicrophoneMute(true)
         muted.set(true)
         SignalLevel.post(0)
         d("init: ADM & audioTrack ready, start muted; mixer α=${"%.2f".format(lastMixerAlpha)} (mix2=${MIX20_ENABLED})")
@@ -105,7 +109,7 @@ class WebRtcCore(private val ctx: Context) {
     }
 
     /** Фабрика ADM с учётом флага Mix 2.0. Пока MixedADM делегирует в JavaADM (поведение не меняется). */
-    private fun buildAudioDeviceModule(appContext: Context): JavaAudioDeviceModule {
+    private fun buildAudioDeviceModule(appContext: Context): org.webrtc.audio.AudioDeviceModule {
         // Общий SamplesReadyCallback — валидация микса (без подмены звука)
         val samplesCb = object : JavaAudioDeviceModule.SamplesReadyCallback {
             override fun onWebRtcAudioRecordSamplesReady(samples: JavaAudioDeviceModule.AudioSamples?) {
@@ -138,7 +142,6 @@ class WebRtcCore(private val ctx: Context) {
                 .setUseStereoOutput(false)
                 .setSamplesReadyCallback(samplesCb)
                 .createAudioDeviceModule()
-                .asJavaModule()
         } else {
             // Обычный JavaADM (как раньше)
             JavaAudioDeviceModule.builder(appContext)
@@ -228,7 +231,7 @@ class WebRtcCore(private val ctx: Context) {
 
     fun setMuted(mutedNow: Boolean) {
         muted.set(mutedNow)
-        try { adm.setMicrophoneMute(mutedNow) } catch (_: Throwable) {}
+        try { (adm as? JavaAudioDeviceModule)?.setMicrophoneMute(mutedNow) } catch (_: Throwable) {}
         try { audioTrack.setEnabled(true) } catch (_: Throwable) {}
         if (mutedNow) {
             shownLevel01 = 0.0
