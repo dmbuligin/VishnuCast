@@ -3,8 +3,14 @@ package com.buligin.vishnucast.audio
 import com.google.android.exoplayer2.audio.AudioProcessor
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import android.util.Log
+
 
 class ExoTeeAudioProcessor : AudioProcessor {
+
+    private val TAG = "VC/TeeProc"
+    private var loggedFormat = false
+
 
     private var sampleRate = 48000
     private var channelCount = 2
@@ -15,11 +21,27 @@ class ExoTeeAudioProcessor : AudioProcessor {
         sampleRate = inputAudioFormat.sampleRate
         channelCount = inputAudioFormat.channelCount
         return inputAudioFormat
+
+        if (!loggedFormat) {
+            Log.d(TAG, "configure: sr=$sampleRate ch=$channelCount")
+            loggedFormat = true
+        }
+
+
+
     }
 
     override fun isActive(): Boolean = true
 
     override fun queueInput(inputBuffer: ByteBuffer) {
+
+
+        if (inputBuffer.hasRemaining()) {
+            Log.v(TAG, "queueInput: ${inputBuffer.remaining()} bytes")
+        }
+
+
+
         if (!inputBuffer.hasRemaining()) return
 
         // Копия в float[] для шины

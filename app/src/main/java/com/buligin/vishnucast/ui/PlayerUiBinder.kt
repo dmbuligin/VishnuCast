@@ -20,8 +20,15 @@ import com.buligin.vishnucast.R
 import com.buligin.vishnucast.audio.PlayerCore
 import com.buligin.vishnucast.audio.PlaylistStore
 import com.buligin.vishnucast.service.MixerState
+import android.util.Log
+
+
+
 
 class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventObserver {
+
+    private val TAG = "VC/PlayerUi"
+
 
     private val app get() = activity.applicationContext
 
@@ -48,11 +55,15 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
 
     private val conn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            Log.d(TAG, "onServiceConnected: player=${player != null}")
+
             val b = binder as? CastService.LocalBinder ?: return
             service = b.service
             player = service?.playerCore()
             hookPlayerObservers()
             syncControlsEnabled()
+
+
             // подтянуть текущий плейлист (на случай, если обновился пока были в фоне)
           //  player?.let { it.setPlaylist(playlistStore.load(), it.currentIndex().coerceAtLeast(0)) }
             // Удален лишний setPlaylist нахуй
@@ -66,6 +77,11 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
     }
 
     fun reloadPlaylistAndPlay(startIndex: Int?) {
+
+
+        Log.d(TAG, "reloadPlaylistAndPlay: startIndex=$startIndex list=${playlistStore.load().size}")
+
+
         val p = player ?: return
         val list = playlistStore.load()
         val enabled = list.isNotEmpty()
@@ -103,22 +119,15 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         setControlsEnabled(false) // до подключения к сервису
 
         btnPrev?.setOnClickListener {
-            player?.let {
-                if (playlistStore.load().isNotEmpty()) {
-                    it.previous(); it.pause(); it.seekTo(0L)
-                }
-            }
-        }
-        btnNext?.setOnClickListener {
-            player?.let {
-                if (playlistStore.load().isNotEmpty()) {
-                    it.next(); it.pause(); it.seekTo(0L)
-                }
-            }
+            Log.d(TAG, "prev()"); player?.let { if (playlistStore.load().isNotEmpty()) { it.previous(); it.pause(); it.seekTo(0L) } }
         }
 
-        btnPlayPause?.setOnClickListener { player?.toggle() }
-        btnPlayPause?.setOnLongClickListener { player?.pause(); player?.seekTo(0L); true }
+        btnNext?.setOnClickListener {
+            Log.d(TAG, "next()"); player?.let { if (playlistStore.load().isNotEmpty()) { it.next(); it.pause(); it.seekTo(0L) } }
+        }
+
+        btnPlayPause?.setOnClickListener { Log.d(TAG, "playPause()"); player?.toggle() }
+        btnPlayPause?.setOnLongClickListener { Log.d(TAG, "stop(longClick)"); player?.pause(); player?.seekTo(0L); true }
 
         seek?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) player?.seekTo(p.toLong()) }

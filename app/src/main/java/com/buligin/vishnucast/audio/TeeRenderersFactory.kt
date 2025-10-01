@@ -5,6 +5,8 @@ import com.google.android.exoplayer2.DefaultRenderersFactory
 import com.google.android.exoplayer2.audio.AudioProcessor
 import com.google.android.exoplayer2.audio.DefaultAudioSink
 import com.google.android.exoplayer2.audio.AudioSink
+import android.util.Log
+
 
 /**
  * RenderersFactory, который добавляет наш Tee AudioProcessor в выходной AudioSink.
@@ -33,6 +35,10 @@ class TeeRenderersFactory(
         if (extraProcessors.isNotEmpty()) {
             builder.setAudioProcessors(extraProcessors)
         }
+
+
+        Log.d("VC/TeeRF", "buildAudioSink: float=$enableFloatOutput offload=DISABLED extra=${extraProcessors.size}")
+
 
         return builder.build()
     }

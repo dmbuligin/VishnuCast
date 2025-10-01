@@ -32,9 +32,19 @@ class PlaylistActivity : AppCompatActivity() {
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
         if (uris.isNullOrEmpty()) return@registerForActivityResult
-        contentResolver.takePersistableUriPermission(
-            uris.first(), Intent.FLAG_GRANT_READ_URI_PERMISSION
-        ) // Android требует хотя бы один явный take в Activity
+
+        // Persistable permission для КАЖДОГО URI
+        uris.forEach { u ->
+            try {
+                contentResolver.takePersistableUriPermission(
+                    u, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: SecurityException) {
+                // на некоторых провайдерах может уже быть дано — игнорируем
+            }
+        }
+
+
         list = store.addUris(uris).toMutableList()
         adapter.submit(list)
     }
