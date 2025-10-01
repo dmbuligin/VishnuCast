@@ -74,6 +74,9 @@ class CastService : Service() {
         startHttpWsIfNeeded()
 
         player = PlayerCore(applicationContext)
+    //    player.setVolume((MixerState.alpha01.value ?: 0f).coerceIn(0f, 1f))
+
+
         playlistStore = PlaylistStore(applicationContext)
 
         applyMute(true)

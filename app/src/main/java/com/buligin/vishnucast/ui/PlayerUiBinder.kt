@@ -65,6 +65,14 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         wirePlayerObservers()
         setControlsEnabled(true)
         refreshUiFromPlayer()
+
+// Синхронизируем стартовую громкость плеера с текущим alpha01 (без ожидания LiveData-обновления)
+        val a = (MixerState.alpha01.value ?: 0f).coerceIn(0f, 1f)
+        player.setVolume01(a)
+        cross?.let {
+            val p = (a * 100).toInt()
+            if (it.progress != p) it.progress = p
+        }
     }
 
     /**
