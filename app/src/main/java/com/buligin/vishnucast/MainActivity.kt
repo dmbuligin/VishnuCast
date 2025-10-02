@@ -376,6 +376,14 @@ class MainActivity : AppCompatActivity() {
             serviceBound = false
         }
         unbindCastService()
+
+
+        if (com.buligin.vishnucast.audio.MixWavDumper.enabled) {
+            com.buligin.vishnucast.audio.MixWavDumper.stop(this)
+        }
+
+
+
         super.onStop()
     }
 
@@ -423,10 +431,13 @@ class MainActivity : AppCompatActivity() {
             item.isChecked = newVal
             if (newVal) {
                 val f = com.buligin.vishnucast.audio.MixWavDumper.start(this)
-                Toast.makeText(this, if (f != null) "Dump ON: ${f.name}" else "Dump start failed", Toast.LENGTH_SHORT)
-                    .show()
+                Toast.makeText(this,
+                    if (f != null) "Dump ON" else "Dump start failed",
+                    Toast.LENGTH_SHORT
+                ).show()
             } else {
-                com.buligin.vishnucast.audio.MixWavDumper.stop()
+                // теперь stop ожидает Context? (для API29+ нужно переписать заголовок через resolver)
+                com.buligin.vishnucast.audio.MixWavDumper.stop(this)
                 Toast.makeText(this, "Dump OFF", Toast.LENGTH_SHORT).show()
             }
             true
