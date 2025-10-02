@@ -397,6 +397,13 @@ class MainActivity : AppCompatActivity() {
 
         menu.findItem(R.id.action_mix_dump)?.isChecked = com.buligin.vishnucast.audio.MixWavDumper.enabled
 
+
+        menu.findItem(R.id.action_dump_player_only)?.isChecked =
+            com.buligin.vishnucast.WebRtcCore.DUMP_PLAYER_ONLY
+        menu.findItem(R.id.action_dump_mic_only)?.isChecked =
+            com.buligin.vishnucast.WebRtcCore.DUMP_MIC_ONLY
+
+
         return true
     }
 
@@ -442,6 +449,37 @@ class MainActivity : AppCompatActivity() {
             }
             true
         }
+
+
+        R.id.action_dump_player_only -> {
+            val newVal = !item.isChecked
+            com.buligin.vishnucast.WebRtcCore.DUMP_PLAYER_ONLY = newVal
+            com.buligin.vishnucast.WebRtcCore.DUMP_MIC_ONLY = false
+            invalidateOptionsMenu() // перерисовать чекбоксы
+            Toast.makeText(
+                this,
+                if (newVal) "Dump mode: PLAYER only" else "Dump mode: MIX",
+                Toast.LENGTH_SHORT
+            ).show()
+            true
+        }
+
+        R.id.action_dump_mic_only -> {
+            val newVal = !item.isChecked
+            com.buligin.vishnucast.WebRtcCore.DUMP_MIC_ONLY = newVal
+            com.buligin.vishnucast.WebRtcCore.DUMP_PLAYER_ONLY = false
+            invalidateOptionsMenu()
+            Toast.makeText(
+                this,
+                if (newVal) "Dump mode: MIC only" else "Dump mode: MIX",
+                Toast.LENGTH_SHORT
+            ).show()
+            true
+        }
+
+
+
+
 
 
         else -> super.onOptionsItemSelected(item)

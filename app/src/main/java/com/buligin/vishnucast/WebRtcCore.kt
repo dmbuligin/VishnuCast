@@ -113,28 +113,59 @@ class WebRtcCore(private val ctx: Context) {
         // Общий SamplesReadyCallback — валидация микса (без подмены звука)
 
         val samplesCb = object : JavaAudioDeviceModule.SamplesReadyCallback {
+
             override fun onWebRtcAudioRecordSamplesReady(samples: JavaAudioDeviceModule.AudioSamples?) {
                 if (samples == null) return
                 try {
                     if (samples.audioFormat != AudioFormat.ENCODING_PCM_16BIT) return
-                    val mic: ShortArray = bytesLeToShorts(samples.data)
+
+                    // 1) mic → гарантированно @48k mono 10-мс окно (ShortArray)
+                    val mic48Mono: ShortArray = ensure48kMono(
+                        samples.data,           // ByteArray PCM16 LE
+                        samples.sampleRate,     // реальная ЧД от ADM
+                        samples.channelCount    // реальные каналы от ADM
+                    )
+
+                    // 2) α из MixerState (0..1)
                     val a = (MixerState.alpha01.value ?: 0f).coerceIn(0f, 1f)
 
-                    // Вычисляем смесь (Mono 48 kHz, длина = длине mic буфера)
-                    val mixed = MixerEngine.mixMicWithPlayer48kMono(mic, a)
+                    // 3) считаем смесь (Mic+Player) уже в @48k mono
+                    val mixed: ShortArray = MixerEngine.mixMicWithPlayer48kMono(mic48Mono, a)
 
+                    // 4) дамп — по флагам диагностики
                     if (com.buligin.vishnucast.audio.MixWavDumper.enabled) {
-                        com.buligin.vishnucast.audio.MixWavDumper.push(mixed)
+                        when {
+                            DUMP_PLAYER_ONLY -> {
+                                // пишем хвост плеера напрямую, без микса
+                                val tail = com.buligin.vishnucast.audio.PlayerPcmBus
+                                    .tail48kMono(mic48Mono.size, 300L)
+                                if (tail != null) {
+                                    com.buligin.vishnucast.audio.MixWavDumper.push(float48ToShort(tail))
+                                } else {
+                                    com.buligin.vishnucast.audio.MixWavDumper.push(ShortArray(mic48Mono.size))
+                                }
+                            }
+                            DUMP_MIC_ONLY -> {
+                                // пишем чистый микрофон
+                                com.buligin.vishnucast.audio.MixWavDumper.push(mic48Mono)
+                            }
+                            else -> {
+                                // обычный путь — пишем микс
+                                com.buligin.vishnucast.audio.MixWavDumper.push(mixed)
+                            }
+                        }
                     }
 
-                    // Sanity-проверка форматов — логируем только при несоответствии
-                    if (mixed.size != mic.size || samples.sampleRate != 48000 || samples.channelCount != 1) {
-                        Log.w(TAG, "Mixer sanity: mic[${mic.size}] ${samples.sampleRate}Hz ch=${samples.channelCount} → mixed[${mixed.size}]")
+                    // sanity-лог один раз при расхождении
+                    if (mixed.size != mic48Mono.size) {
+                        Log.w(TAG, "Mixer sanity: mic[${mic48Mono.size}] → mixed[${mixed.size}]")
                     }
                 } catch (t: Throwable) {
                     Log.w(TAG, "mixMicWithPlayer48kMono error: ${t.message}")
                 }
             }
+
+
         }
 
         return if (MIX20_ENABLED) {
@@ -175,6 +206,76 @@ class WebRtcCore(private val ctx: Context) {
         }
         return out
     }
+
+    /** Привести PCM16 (ByteArray, LE) к 48k mono (ShortArray). */
+    private fun ensure48kMono(srcPcm16: ByteArray, sr: Int, ch: Int): ShortArray {
+        // ByteArray PCM16 LE → short[]
+        val shorts = ShortArray(srcPcm16.size / 2)
+        java.nio.ByteBuffer.wrap(srcPcm16).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            .asShortBuffer().get(shorts)
+
+        // → float[], downmix stereo→mono при необходимости
+        val monoFloat: FloatArray = if (ch <= 1) {
+            FloatArray(shorts.size) { i -> shorts[i] / 32768f }
+        } else {
+            val frames = shorts.size / ch
+            val out = FloatArray(frames)
+            var si = 0
+            var f = 0
+            while (f < frames) {
+                var acc = 0f
+                var c = 0
+                while (c < ch) { acc += (shorts[si + c] / 32768f); c++ }
+                out[f] = acc / ch
+                si += ch
+                f++
+            }
+            out
+        }
+
+        // ресемпл → 48k при необходимости
+        val mono48: FloatArray = if (sr == 48000) monoFloat else resampleLinear(monoFloat, sr, 48000)
+
+        // → short[]
+        return float48ToShort(mono48)
+    }
+
+    /** Простейший линейный ресемпл float[]. */
+    private fun resampleLinear(src: FloatArray, srcRate: Int, dstRate: Int): FloatArray {
+        if (src.isEmpty()) return src
+        val ratio = dstRate.toDouble() / srcRate.toDouble()
+        val outLen = kotlin.math.max(1, (src.size * ratio).toInt())
+        val out = FloatArray(outLen)
+        val maxIdx = src.size - 1
+        var i = 0
+        while (i < outLen) {
+            val pos = i / ratio
+            val i0 = kotlin.math.floor(pos).toInt().coerceIn(0, maxIdx)
+            val i1 = kotlin.math.min(i0 + 1, maxIdx)
+            val frac = (pos - i0)
+            val s = src[i0] * (1.0 - frac) + src[i1] * frac
+            out[i] = s.toFloat()
+            i++
+        }
+        return out
+    }
+
+    /** Конвертация float@48k mono → short[]. */
+    private fun float48ToShort(src: FloatArray): ShortArray {
+        val out = ShortArray(src.size)
+        var i = 0
+        while (i < src.size) {
+            val v = (src[i] * 32767.0f).toInt()
+            out[i] = v.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+            i++
+        }
+        return out
+    }
+
+
+
+
+
 
     private fun startGuardTimer() {
         try { guardTimer?.cancel() } catch (_: Throwable) {}
@@ -502,6 +603,9 @@ class WebRtcCore(private val ctx: Context) {
     }
 
     companion object {
+        @Volatile var DUMP_PLAYER_ONLY: Boolean = false
+        @Volatile var DUMP_MIC_ONLY: Boolean = false
+
         @Volatile var LEVEL_TICK_MS: Int = 120
         @Volatile var LEVEL_RELEASE_PER_SEC: Double = 1.50
         @Volatile var LOG_ENABLED: Boolean = true

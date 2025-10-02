@@ -137,6 +137,8 @@
     <string name="cast_menu_mix20">Mix 2.0 (Mic+Player)</string>
     <string name="cast_menu_mix_dump">Dump mix to WAV</string>
 
+    <string name="cast_menu_dump_player_only">Dump: Player only</string>
+    <string name="cast_menu_dump_mic_only">Dump: Mic only</string>
 
 
 </resources>
