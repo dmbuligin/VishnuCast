@@ -504,7 +504,22 @@ class WebRtcCore(private val ctx: Context) {
         /** Флаг каркаса Mix 2.0. Сейчас поведение не меняет (MixedADM делегирует в JavaADM). */
         @Volatile var MIX20_ENABLED: Boolean = false
 
+
+        fun setMix20Enabled(enabled: Boolean) {
+            MIX20_ENABLED = enabled
+            Log.i("VishnuCast", "Mix2.0=${if (enabled) "ON" else "OFF"} (jni=${com.buligin.vishnucast.audio.VcMix.isReady()})")
+        }
+
+
         private const val TAG = "VishnuCast"
+
+
+
+
+
+
+
+
     }
 
     // ======== ВНУТРЕННИЕ КЛАССЫ/ОБЪЕКТЫ ========

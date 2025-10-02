@@ -74,6 +74,7 @@ class MainActivity : AppCompatActivity() {
     }
 
 
+    private var mixBadge: TextView? = null
 
     private var serviceConnection: ServiceConnection? = null
     private var serviceBound = false
@@ -104,6 +105,18 @@ class MainActivity : AppCompatActivity() {
         override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { updateInputBadge() }
         override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) { updateInputBadge() }
     }
+
+    private fun updateMixBadge() {
+        findViewById<TextView?>(R.id.mixBadge)?.apply {
+            if (WebRtcCore.MIX20_ENABLED) {
+                text = "Mix2: ON"
+                visibility = View.VISIBLE
+            } else {
+                visibility = View.GONE
+            }
+        }
+    }
+
 
 
     private fun bindCastService() {
@@ -174,6 +187,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        mixBadge = findViewById(R.id.mixBadge)
 
         CastService.ensureStarted(applicationContext)
 
@@ -346,6 +361,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         bindCastService()
+
+        updateMixBadge()
     }
 
     override fun onStop() {
@@ -366,6 +383,12 @@ class MainActivity : AppCompatActivity() {
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         val inflater: MenuInflater = menuInflater
         inflater.inflate(R.menu.main_menu, menu)
+
+        val mixItem = menu.findItem(R.id.action_mix20)
+        mixItem?.isChecked = WebRtcCore.MIX20_ENABLED
+
+
+
         return true
     }
 
@@ -379,14 +402,21 @@ class MainActivity : AppCompatActivity() {
         R.id.action_refresh -> { refreshNetworkUi(); true }
 
         R.id.action_open_playlist -> {
-            openPlaylist.launch(android.content.Intent(this, com.buligin.vishnucast.ui.PlaylistActivity::class.java))
-
-
-
+            openPlaylist.launch(android.content.Intent(this, com.buligin.vishnucast.ui.PlaylistActivity::class.java));
+            true }
+        R.id.action_mix20 -> {
+            val newVal = !item.isChecked
+            item.isChecked = newVal
+            WebRtcCore.setMix20Enabled(newVal)
+            // Небольшой тост для наглядности
+            Toast.makeText(this,
+                if (newVal) "Mix 2.0: ON (пока делегат, без изменения звука)"
+                else "Mix 2.0: OFF",
+                Toast.LENGTH_SHORT
+            ).show()
+            updateMixBadge()
             true
         }
-
-
 
 
         else -> super.onOptionsItemSelected(item)

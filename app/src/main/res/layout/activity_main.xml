@@ -113,6 +113,17 @@
                 android:progress="0"
                 android:progressDrawable="@drawable/signal_level_bar" />
 
+            <!-- Mix2 bage -->
+            <TextView
+                android:id="@+id/mixBadge"
+                style="@style/TextAppearance.Material3.BodySmall"
+                android:text="Mix2: OFF"
+                android:padding="4dp"
+                android:background="@drawable/bg_status_pill"
+                android:visibility="gone"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"/>
+
             <!-- Статус -->
             <TextView
                 android:id="@+id/tvStatus"

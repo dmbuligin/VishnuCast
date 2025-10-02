@@ -128,5 +128,8 @@
     <string name="cast_mix_player">Плеер</string>
 
 
+    <!--Tests-->
+    <string name="cast_menu_mix20">Mix 2.0 (Mic+Player)</string>
+
 
 </resources>
