@@ -6,31 +6,51 @@ import kotlin.math.min
 
 /**
  * Кольцевой буфер плеера: всегда MONO 48 kHz, float [-1..1].
- * На вход принимает interleaved float[] (ch=1..N) при любом sample rate.
- * Внутри: downmix→mono, при необходимости resample→48k, запись в ring.
+ * На вход: interleaved float[] (ch=1..N) при любом sr.
+ * Внутри: downmix→mono, ИНКРЕМЕНТАЛЬНЫЙ resample→48k (с непрерывной фазой), запись в ring.
  */
 object PlayerPcmBus {
 
-    // Курсор последовательного чтения
-    @Volatile private var readIdx = -1
-    @Volatile private var seqActive = false
-
-    // 1 сек. буфер на 48k — с запасом
-    private const val RING_CAP = 48_000
-
-    // Кольцо и индексы
+    // ===== Ринг-буфер 48 kHz mono =====
+    private const val RING_CAP = 48_000  // 1 сек буфер
     private val ring = FloatArray(RING_CAP)
     private var writeIdx = 0
     private var filled = 0
-
-    // Свежесть потока
     private var lastWriteAtMs: Long = 0L
 
-    // 🔒 общий замок на запись/чтение
+    // Курсор последовательного чтения
+    private var readIdx = -1
+    private var seqActive = false
+
+    // ===== Состояние инкрементального ресемплера  → 48 kHz =====
+    // Последний моно-образец предыдущего чанка
+    private var rsPrev: Float = 0f
+    // Фаза внутри текущего отрезка [prev → curr]; 0..1
+    private var rsPhase: Double = 0.0
+    // Текущая частота источника; при смене — реинициализация
+    private var rsSrcRate: Int = 0
+    // При первом запуске — используем prev == curr, чтобы не было скачка
+    private var rsInitialized: Boolean = false
+
+    // Общий замок на запись/чтение/состояние
     private val lock = Any()
 
+    /** Полный сброс буферов, курсоров и состояния ресемплера. */
+    fun clear() {
+        synchronized(lock) {
+            writeIdx = 0
+            filled = 0
+            lastWriteAtMs = 0L
+            readIdx = -1
+            seqActive = false
+            rsPrev = 0f
+            rsPhase = 0.0
+            rsSrcRate = 0
+            rsInitialized = false
+        }
+    }
 
-    /** Сбросить курсор последовательного чтения (на переключениях/паузе). */
+    /** Сбросить только курсор последовательного чтения (при паузе/переключении трека). */
     fun resetSequential() {
         synchronized(lock) {
             readIdx = -1
@@ -39,67 +59,13 @@ object PlayerPcmBus {
     }
 
     /**
-     * Выдать СЛЕДУЮЩИЕ n сэмплов @48k mono из кольца (не «хвост», а непрерывный поток).
-     * Если данных пока мало — вернём null (можно подложить тишину).
-     */
-    fun take48kMono(n: Int, maxAgeMs: Long = 300L): FloatArray? {
-        if (n <= 0) return null
-        synchronized(lock) {
-            val age = System.currentTimeMillis() - lastWriteAtMs
-            if (age > maxAgeMs || filled == 0) return null
-
-            // Инициализируем курсор: стартуем так, чтобы первый блок заканчивался в current writeIdx
-            if (readIdx < 0 || !seqActive) {
-                val end = writeIdx
-                var start = end - n
-                if (start < 0) start += RING_CAP
-                readIdx = start
-                seqActive = true
-            }
-
-            // Проверим, что у нас точно есть n сэмплов вперёд от readIdx
-            val available = filled
-            if (available < n) return null  // ещё не накачали, подождём следующий тик
-
-            // Читаем n сэмплов с readIdx и двигаем курсор
-            val out = FloatArray(n)
-            val start = readIdx
-            if (start + n <= RING_CAP) {
-                System.arraycopy(ring, start, out, 0, n)
-            } else {
-                val first = RING_CAP - start
-                System.arraycopy(ring, start, out, 0, first)
-                System.arraycopy(ring, 0, out, first, n - first)
-            }
-            readIdx = (readIdx + n) % RING_CAP
-            return out
-        }
-    }
-
-
-
-    /** Сброс буфера (на паузе/ошибке/стопе) */
-    fun clear() {
-        synchronized(lock) { // 🔒
-            writeIdx = 0
-            filled = 0
-            lastWriteAtMs = 0L
-        }
-
-        readIdx = -1
-        seqActive = false
-    }
-
-    /**
-     * Принять interleaved float[], downmix→mono, resample→48k (если нужно) и записать в кольцо.
-     * @param src interleaved [-1..1]
-     * @param ch  количество каналов в src (>=1)
-     * @param sr  sample rate в src (Гц)
+     * Принять interleaved float[], downmix→mono, ИНКРЕМЕНТАЛЬНО resample→48k и записать в ринг.
+     * Важно: stateful-ресемплер сохраняет фазу между вызовами push(...) — треск исчезает.
      */
     fun push(src: FloatArray, ch: Int, sr: Int) {
         if (src.isEmpty() || ch <= 0 || sr <= 0) return
 
-        // Downmix → mono
+        // 1) Downmix → mono
         val frames = src.size / ch
         if (frames <= 0) return
         val mono = FloatArray(frames)
@@ -122,35 +88,79 @@ object PlayerPcmBus {
             }
         }
 
-        // Resample → 48k, если нужно
-        val mono48: FloatArray = if (sr == 48_000) mono else resampleLinear(mono, sr, 48_000)
+        // 2) Инкрементальный ресемпл → 48k (с непрерывной фазой)
+        val out48 = if (sr == 48_000) {
+            // На 48k тоже поддержим последовательность: prev = последний сэмпл
+            synchronized(lock) {
+                rsSrcRate = 48_000
+                rsInitialized = true
+                rsPrev = mono.last()
+            }
+            mono
+        } else {
+            resampleTo48kIncremental(mono, sr)
+        }
 
-        // Запись в кольцо (атомарно)
-        synchronized(lock) { // 🔒
-            writeContinuous(mono48)
+        // 3) Запись в кольцевой буфер (атомарно)
+        synchronized(lock) {
+            writeContinuous(out48)
             lastWriteAtMs = System.currentTimeMillis()
         }
     }
 
-    /** Вернуть непрерывный хвост длиной tailSamples (обычно 480), если поток свежий. */
+    /**
+     * Выдать СЛЕДУЮЩИЕ n сэмплов @48k mono из кольца (не «хвост», а непрерывный поток).
+     * Если данных пока мало — вернём null (можно подложить тишину и подождать).
+     */
+    fun take48kMono(n: Int, maxAgeMs: Long = 300L): FloatArray? {
+        if (n <= 0) return null
+        synchronized(lock) {
+            val age = System.currentTimeMillis() - lastWriteAtMs
+            if (age > maxAgeMs || filled == 0) return null
+
+            // Инициализируем курсор так, чтобы первый блок заканчивался в текущем writeIdx
+            if (readIdx < 0 || !seqActive) {
+                val end = writeIdx
+                var start = end - n
+                if (start < 0) start += RING_CAP
+                readIdx = start
+                seqActive = true
+            }
+
+            // Проверка доступности
+            if (filled < n) return null
+
+            val out = FloatArray(n)
+            val start = readIdx
+            if (start + n <= RING_CAP) {
+                System.arraycopy(ring, start, out, 0, n)
+            } else {
+                val first = RING_CAP - start
+                System.arraycopy(ring, start, out, 0, first)
+                System.arraycopy(ring, 0, out, first, n - first)
+            }
+            readIdx = (readIdx + n) % RING_CAP
+            return out
+        }
+    }
+
+    /** Для быстрых срезов (индикаторы), НЕ непрерывное чтение. */
     fun tail48kMono(tailSamples: Int, maxAgeMs: Long = 300L): FloatArray? {
         if (tailSamples <= 0) return null
-        synchronized(lock) { // 🔒 читаем консистентно
+        synchronized(lock) {
             val age = System.currentTimeMillis() - lastWriteAtMs
             if (age > maxAgeMs || filled == 0) return null
 
             val n = min(tailSamples, min(filled, RING_CAP))
             val out = FloatArray(n)
 
-            val end = writeIdx // позиция следующей записи = «конец»
+            val end = writeIdx
             var start = end - n
             if (start < 0) start += RING_CAP
 
             if (start + n <= RING_CAP) {
-                // без обёртки
                 System.arraycopy(ring, start, out, 0, n)
             } else {
-                // с обёрткой
                 val first = RING_CAP - start
                 System.arraycopy(ring, start, out, 0, first)
                 System.arraycopy(ring, 0, out, first, n - first)
@@ -161,11 +171,11 @@ object PlayerPcmBus {
 
     // ===== helpers =====
 
+    /** Непрерывная запись в ринг. */
     private fun writeContinuous(mono48: FloatArray) {
         var srcIdx = 0
         val n = mono48.size
         if (n == 0) return
-
         while (srcIdx < n) {
             val toEnd = RING_CAP - writeIdx
             val run = min(toEnd, n - srcIdx)
@@ -176,23 +186,57 @@ object PlayerPcmBus {
         }
     }
 
-    private fun resampleLinear(src: FloatArray, srcRate: Int, dstRate: Int): FloatArray {
-        if (src.isEmpty()) return src
-        val ratio = dstRate.toDouble() / srcRate.toDouble()
-        val outLen = max(1, (src.size * ratio).toInt())
-        val out = FloatArray(outLen)
+    /**
+     * Инкрементальный ресемпл в 48 kHz (линейная интерполяция) с сохранением фазы между чанками.
+     * Состояние rsPrev/rsPhase/rsSrcRate/rsInitialized находится под lock.
+     */
+    private fun resampleTo48kIncremental(srcMono: FloatArray, srcRate: Int): FloatArray {
+        synchronized(lock) {
+            // Если сменилась ЧД — переинициализируем
+            if (rsSrcRate != srcRate) {
+                rsSrcRate = srcRate
+                rsPhase = 0.0
+                rsInitialized = false
+            }
 
-        val maxIdx = src.size - 1
-        var i = 0
-        while (i < outLen) {
-            val pos = i / ratio
-            val i0 = floor(pos).toInt().coerceIn(0, maxIdx)
-            val i1 = min(i0 + 1, maxIdx)
-            val frac = (pos - i0)
-            val s = src[i0] * (1.0 - frac) + src[i1] * frac
-            out[i] = s.toFloat()
-            i++
+            // Соотношение (на сколько исходного "времени" продвигаемся за 1 выходной сэмпл)
+            val inc = srcRate.toDouble() / 48_000.0
+
+            val out = ArrayList<Float>( (srcMono.size * 48_000L / srcRate).toInt() + 8 )
+
+            var prev = rsPrev
+            var phase = rsPhase
+            var initialized = rsInitialized
+
+            var i = 0
+            // Если не инициализированы — стартуем без скачка: prev = первый сэмпл
+            if (!initialized) {
+                prev = if (srcMono.isNotEmpty()) srcMono[0] else 0f
+                phase = 0.0
+                initialized = true
+            }
+
+            while (i < srcMono.size) {
+                val curr = srcMono[i]
+                // Пока внутри отрезка [prev → curr] помещаются выходные сэмплы — генерим их
+                while (phase < 1.0) {
+                    val s = (prev * (1.0 - phase) + curr * phase).toFloat()
+                    out.add(s)
+                    phase += inc
+                }
+                // Переходим к следующему исходному отрезку, сохраняя "лишнюю" долю фазы
+                phase -= 1.0
+                prev = curr
+                i++
+            }
+
+            // Обновляем состояние для следующего чанка
+            rsPrev = prev
+            rsPhase = phase
+            rsInitialized = initialized
+
+            // В массив
+            return out.toFloatArray()
         }
-        return out
     }
 }
