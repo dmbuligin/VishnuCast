@@ -134,27 +134,36 @@ class WebRtcCore(private val ctx: Context) {
 
                     // 4) дамп — по флагам диагностики
                     if (com.buligin.vishnucast.audio.MixWavDumper.enabled) {
+
                         when {
                             DUMP_PLAYER_ONLY -> {
-                                // пишем хвост плеера напрямую, без микса
-                                val tail = com.buligin.vishnucast.audio.PlayerPcmBus
-                                    .tail48kMono(mic48Mono.size, 300L)
-                                if (tail != null) {
-                                    com.buligin.vishnucast.audio.MixWavDumper.push(float48ToShort(tail))
+                                val next = com.buligin.vishnucast.audio.PlayerPcmBus.take48kMono(mic48Mono.size, 300L)
+                                if (next != null) {
+                                    com.buligin.vishnucast.audio.MixWavDumper.push(float48ToShort(next))
                                 } else {
                                     com.buligin.vishnucast.audio.MixWavDumper.push(ShortArray(mic48Mono.size))
                                 }
                             }
                             DUMP_MIC_ONLY -> {
-                                // пишем чистый микрофон
                                 com.buligin.vishnucast.audio.MixWavDumper.push(mic48Mono)
                             }
                             else -> {
-                                // обычный путь — пишем микс
+                                // Для микса тоже возьмём последовательный плеерный блок
+                                val next = com.buligin.vishnucast.audio.PlayerPcmBus.take48kMono(mic48Mono.size, 300L)
+                                val mixed = if (next != null) {
+                                    // переводим float→short и смешиваем
+                                    val playerShort = float48ToShort(next)
+                                    com.buligin.vishnucast.audio.MixerEngine.mixMicWithPlayer48kMono(mic48Mono, a)
+                                } else {
+                                    // плеер пуст — чистый микрофон
+                                    mic48Mono.copyOf()
+                                }
                                 com.buligin.vishnucast.audio.MixWavDumper.push(mixed)
                             }
                         }
+
                     }
+
 
                     // sanity-лог один раз при расхождении
                     if (mixed.size != mic48Mono.size) {

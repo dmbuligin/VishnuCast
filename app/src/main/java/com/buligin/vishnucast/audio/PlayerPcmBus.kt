@@ -11,6 +11,10 @@ import kotlin.math.min
  */
 object PlayerPcmBus {
 
+    // Курсор последовательного чтения
+    @Volatile private var readIdx = -1
+    @Volatile private var seqActive = false
+
     // 1 сек. буфер на 48k — с запасом
     private const val RING_CAP = 48_000
 
@@ -25,6 +29,55 @@ object PlayerPcmBus {
     // 🔒 общий замок на запись/чтение
     private val lock = Any()
 
+
+    /** Сбросить курсор последовательного чтения (на переключениях/паузе). */
+    fun resetSequential() {
+        synchronized(lock) {
+            readIdx = -1
+            seqActive = false
+        }
+    }
+
+    /**
+     * Выдать СЛЕДУЮЩИЕ n сэмплов @48k mono из кольца (не «хвост», а непрерывный поток).
+     * Если данных пока мало — вернём null (можно подложить тишину).
+     */
+    fun take48kMono(n: Int, maxAgeMs: Long = 300L): FloatArray? {
+        if (n <= 0) return null
+        synchronized(lock) {
+            val age = System.currentTimeMillis() - lastWriteAtMs
+            if (age > maxAgeMs || filled == 0) return null
+
+            // Инициализируем курсор: стартуем так, чтобы первый блок заканчивался в current writeIdx
+            if (readIdx < 0 || !seqActive) {
+                val end = writeIdx
+                var start = end - n
+                if (start < 0) start += RING_CAP
+                readIdx = start
+                seqActive = true
+            }
+
+            // Проверим, что у нас точно есть n сэмплов вперёд от readIdx
+            val available = filled
+            if (available < n) return null  // ещё не накачали, подождём следующий тик
+
+            // Читаем n сэмплов с readIdx и двигаем курсор
+            val out = FloatArray(n)
+            val start = readIdx
+            if (start + n <= RING_CAP) {
+                System.arraycopy(ring, start, out, 0, n)
+            } else {
+                val first = RING_CAP - start
+                System.arraycopy(ring, start, out, 0, first)
+                System.arraycopy(ring, 0, out, first, n - first)
+            }
+            readIdx = (readIdx + n) % RING_CAP
+            return out
+        }
+    }
+
+
+
     /** Сброс буфера (на паузе/ошибке/стопе) */
     fun clear() {
         synchronized(lock) { // 🔒
@@ -32,6 +85,9 @@ object PlayerPcmBus {
             filled = 0
             lastWriteAtMs = 0L
         }
+
+        readIdx = -1
+        seqActive = false
     }
 
     /**

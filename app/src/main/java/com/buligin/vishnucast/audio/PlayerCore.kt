@@ -84,6 +84,7 @@ class PlayerCore(context: Context) {
             // 👉 при переходе в паузу мгновенно чистим шину
             if (!isPlaying) {
                 PlayerPcmBus.clear()
+                PlayerPcmBus.resetSequential()
             }
             scheduleTicker()
         }
@@ -98,6 +99,7 @@ class PlayerCore(context: Context) {
             // Без падений: просто остановим воспроизведение.
             _isPlaying.postValue(false)
             PlayerPcmBus.clear() // 👉 на ошибке тоже чистим
+            PlayerPcmBus.resetSequential()
             scheduleTicker()
         }
     }
