@@ -11,23 +11,27 @@ import kotlin.math.min
  */
 object PlayerPcmBus {
 
-    // 1 сек. буфер на 48k — с запасом для стабильности (низкие задержки, без разрывов)
+    // 1 сек. буфер на 48k — с запасом
     private const val RING_CAP = 48_000
 
     // Кольцо и индексы
     private val ring = FloatArray(RING_CAP)
-    @Volatile private var writeIdx = 0
-    @Volatile private var filled = 0
+    private var writeIdx = 0
+    private var filled = 0
 
-    // Свежесть потока (для mute/паузы)
-    @Volatile private var lastWriteAtMs: Long = 0L
+    // Свежесть потока
+    private var lastWriteAtMs: Long = 0L
+
+    // 🔒 общий замок на запись/чтение
+    private val lock = Any()
 
     /** Сброс буфера (на паузе/ошибке/стопе) */
     fun clear() {
-        writeIdx = 0
-        filled = 0
-        lastWriteAtMs = 0L
-        // Нули в массиве не обязательны — filled=0 достаточно
+        synchronized(lock) { // 🔒
+            writeIdx = 0
+            filled = 0
+            lastWriteAtMs = 0L
+        }
     }
 
     /**
@@ -46,7 +50,6 @@ object PlayerPcmBus {
         var si = 0
         var f = 0
         if (ch == 1) {
-            // Быстрый путь
             while (f < frames) {
                 mono[f] = src[si]
                 si += 1
@@ -66,36 +69,38 @@ object PlayerPcmBus {
         // Resample → 48k, если нужно
         val mono48: FloatArray = if (sr == 48_000) mono else resampleLinear(mono, sr, 48_000)
 
-        // Запись в кольцо
-        writeContinuous(mono48)
-
-        lastWriteAtMs = System.currentTimeMillis()
+        // Запись в кольцо (атомарно)
+        synchronized(lock) { // 🔒
+            writeContinuous(mono48)
+            lastWriteAtMs = System.currentTimeMillis()
+        }
     }
 
     /** Вернуть непрерывный хвост длиной tailSamples (обычно 480), если поток свежий. */
     fun tail48kMono(tailSamples: Int, maxAgeMs: Long = 300L): FloatArray? {
         if (tailSamples <= 0) return null
-        val age = System.currentTimeMillis() - lastWriteAtMs
-        if (age > maxAgeMs || filled == 0) return null
+        synchronized(lock) { // 🔒 читаем консистентно
+            val age = System.currentTimeMillis() - lastWriteAtMs
+            if (age > maxAgeMs || filled == 0) return null
 
-        val n = min(tailSamples, min(filled, RING_CAP))
-        val out = FloatArray(n)
+            val n = min(tailSamples, min(filled, RING_CAP))
+            val out = FloatArray(n)
 
-        val end = writeIdx // позиция следующей записи = «конец»
-        var start = end - n
-        if (start < 0) start += RING_CAP
+            val end = writeIdx // позиция следующей записи = «конец»
+            var start = end - n
+            if (start < 0) start += RING_CAP
 
-        if (start + n <= RING_CAP) {
-            // без обёртки
-            System.arraycopy(ring, start, out, 0, n)
-        } else {
-            // с обёрткой
-            val first = RING_CAP - start
-            System.arraycopy(ring, start, out, 0, first)
-            System.arraycopy(ring, 0, out, first, n - first)
+            if (start + n <= RING_CAP) {
+                // без обёртки
+                System.arraycopy(ring, start, out, 0, n)
+            } else {
+                // с обёрткой
+                val first = RING_CAP - start
+                System.arraycopy(ring, start, out, 0, first)
+                System.arraycopy(ring, 0, out, first, n - first)
+            }
+            return out
         }
-
-        return out
     }
 
     // ===== helpers =====
