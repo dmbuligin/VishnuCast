@@ -34,7 +34,7 @@ class ExoTeeAudioProcessor : AudioProcessor {
     override fun queueInput(inputBuffer: ByteBuffer) {
         if (!inputBuffer.hasRemaining()) return
 
-        // 1) pass-through copy → output
+        // 1) pass-through → output
         val len = inputBuffer.remaining()
         var out = scratch
         if (out.capacity() < len) {
@@ -59,25 +59,25 @@ class ExoTeeAudioProcessor : AudioProcessor {
                     bb.asShortBuffer().get(shorts)
                     val floats = FloatArray(shorts.size)
                     var i = 0
-                    while (i < shorts.size) {
-                        floats[i] = shorts[i] / 32768f
-                        i++
-                    }
+                    while (i < shorts.size) { floats[i] = shorts[i] / 32768f; i++ }
                     PlayerPcmBus.push(floats, ch, sr)
                 }
                 C.ENCODING_PCM_FLOAT -> {
                     val bb = inputBuffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
-                    val fb: FloatBuffer = bb.asFloatBuffer()
+                    val fb = bb.asFloatBuffer()
                     val floats = FloatArray(fb.remaining())
                     fb.get(floats)
                     PlayerPcmBus.push(floats, ch, sr)
                 }
-                else -> { /* ignore */ }
             }
         } catch (t: Throwable) {
             Log.w("VC/TeeProc", "tap error: ${t.message}")
         }
+
+        // ✅ важно: помечаем, что вход прочитан
+        inputBuffer.position(inputBuffer.limit())
     }
+
 
     override fun getOutput(): ByteBuffer {
         val out = output

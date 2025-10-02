@@ -22,24 +22,25 @@ class TeeRenderersFactory(
         enableAudioTrackPlaybackParams: Boolean,
         enableOffload: Boolean
     ): AudioSink {
-        // Собираем DefaultAudioSink с дополнительными процессорами.
+        val caps = com.google.android.exoplayer2.audio.AudioCapabilities.getCapabilities(context)
+
         val builder = DefaultAudioSink.Builder()
+            .setAudioCapabilities(caps)
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-
-            .setOffloadMode(
-                if (enableOffload) DefaultAudioSink.OFFLOAD_MODE_ENABLED_GAPLESS_NOT_REQUIRED
-                else DefaultAudioSink.OFFLOAD_MODE_DISABLED
-            )
+            // Процессоры (наш Tee) несовместимы с offload → принудительно выключаем
+            .setOffloadMode(DefaultAudioSink.OFFLOAD_MODE_DISABLED)
 
         if (extraProcessors.isNotEmpty()) {
             builder.setAudioProcessors(extraProcessors)
         }
 
-
-        Log.d("VC/TeeRF", "buildAudioSink: float=$enableFloatOutput offload=DISABLED extra=${extraProcessors.size}")
-
-
+        Log.d("VC/TeeRF", "buildAudioSink: caps=$caps float=$enableFloatOutput offload=DISABLED extra=${extraProcessors.size}")
         return builder.build()
     }
+
+
+
+
+
 }
