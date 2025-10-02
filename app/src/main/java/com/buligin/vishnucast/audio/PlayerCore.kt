@@ -15,6 +15,7 @@ import com.google.android.exoplayer2.audio.AudioAttributes
 import com.google.android.exoplayer2.MediaMetadata
 //import com.buligin.vishnucast.audio.TeeRenderersFactory
 //import com.google.android.exoplayer2.RenderersFactory
+import com.buligin.vishnucast.audio.PlayerPcmBus
 
 
 /**
@@ -55,7 +56,15 @@ class PlayerCore(context: Context) {
             .build()
         setAudioAttributes(aa, /* handleAudioFocus = */ true)
         setHandleAudioBecomingNoisy(true)
+
+
+
     }
+
+
+
+
+
 
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -63,11 +72,19 @@ class PlayerCore(context: Context) {
             if (playbackState == Player.STATE_READY) {
                 _durationMs.postValue(exo.duration.coerceAtLeast(0L))
             }
+            // 👉 если плеер не в активном воспроизведении — чистим шину
+            if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
+                PlayerPcmBus.clear()
+            }
             scheduleTicker()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.postValue(isPlaying)
+            // 👉 при переходе в паузу мгновенно чистим шину
+            if (!isPlaying) {
+                PlayerPcmBus.clear()
+            }
             scheduleTicker()
         }
 
@@ -80,9 +97,14 @@ class PlayerCore(context: Context) {
         override fun onPlayerError(error: PlaybackException) {
             // Без падений: просто остановим воспроизведение.
             _isPlaying.postValue(false)
+            PlayerPcmBus.clear() // 👉 на ошибке тоже чистим
             scheduleTicker()
         }
     }
+
+
+
+
 
     private var playlist: MutableList<PlaylistItem> = mutableListOf()
     private var currentIndex: Int = -1

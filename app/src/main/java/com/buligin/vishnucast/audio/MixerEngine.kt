@@ -20,10 +20,6 @@ import kotlin.math.roundToInt
  */
 object MixerEngine {
 
-    /**
-     * Смешать микрофон (моно 48kHz) и плеер (float interleaved, ch=1|2, sr=any) по коэффициенту alpha (0..1).
-     * Если плеер недоступен/пуст — вернём копию микрофона (т.е. деградация без артефактов).
-     */
     fun mixMicWithPlayer48kMono(
         mic10ms: ShortArray,
         alpha01: Float
@@ -31,122 +27,98 @@ object MixerEngine {
         val a = alpha01.coerceIn(0f, 1f)
         if (mic10ms.isEmpty()) return mic10ms
 
-        // Если нет данных плеера — просто копия микрофона
-        val bus = PlayerPcmBus.latest()
-        if (bus == null) {
+        // Берём только свежий буфер плеера (иначе — деградация в Mic)
+        val src = PlayerPcmBus.latestFresh(200L)
+        if (src == null) {
             return mic10ms.copyOf()
         }
 
-        // Приводим плеер к mono 48 kHz с той же длиной, что и mic10ms
-        val playerMono48 = toMono48kShort(
-            src = bus,
-            srcChannels = PlayerPcmBus.channels,
-            srcSampleRate = PlayerPcmBus.sampleRate,
-            dstLen = mic10ms.size
-        )
+        // Вырезаем "последние 10 мс" на исходной ЧД, приводим к mono
+        val player10msMono = tail10msMono(src, PlayerPcmBus.channels, PlayerPcmBus.sampleRate)
 
-        // Микширование: out = (1-a)*mic + a*player
+        // Ресемплим 10мс от ЧД плеера → 48 кГц и приводим длину к mic10ms.size (обычно 480)
+        val player48 = resampleTo48kAndFit(player10msMono, PlayerPcmBus.sampleRate, mic10ms.size)
+
+        // Микширование
         val out = ShortArray(mic10ms.size)
         val inv = 1f - a
         var i = 0
         while (i < out.size) {
             val micS = mic10ms[i].toInt()
-            val plS = playerMono48[i].toInt()
-            var mix = (inv * micS + a * plS).roundToInt()
-
-            // Софт-клип внутри 16-бит
+            val plS = player48[i].toInt()
+            var mix = (inv * micS + a * plS).toInt()
             if (mix > Short.MAX_VALUE.toInt()) mix = Short.MAX_VALUE.toInt()
             else if (mix < Short.MIN_VALUE.toInt()) mix = Short.MIN_VALUE.toInt()
-
             out[i] = mix.toShort()
             i++
         }
         return out
     }
 
-    /**
-     * Преобразовать interleaved float PCM [-1..1] (ch=1|2, sr=any) в short[] mono 48 kHz фиксированной длины dstLen.
-     * - Downmix в моно: усреднение каналов (L+R)/2;
-     * - Resample: простая линейная интерполяция (достаточно для голоса/музыки на 10мс окнах).
-     */
-    fun toMono48kShort(
-        src: FloatArray,
-        srcChannels: Int,
-        srcSampleRate: Int,
-        dstLen: Int
-    ): ShortArray {
-        // Шаг 1: downmix в моно float[]
-        val mono = when (srcChannels.coerceAtLeast(1)) {
-            1 -> src.copyOf() // уже моно
-            else -> {
-                val frames = src.size / srcChannels
-                val out = FloatArray(frames)
-                var si = 0
-                var i = 0
-                while (i < frames) {
-                    // усредняем все каналы (обычно 2)
-                    var acc = 0f
-                    var c = 0
-                    while (c < srcChannels) {
-                        acc += src[si + c]
-                        c++
-                    }
-                    out[i] = acc / srcChannels
-                    si += srcChannels
-                    i++
-                }
-                out
-            }
+    /** Вырезать последние ~10мс (frames = sr*0.01) и downmix→mono (float[-1..1]). */
+    private fun tail10msMono(srcInterleaved: FloatArray, ch: Int, sr: Int): FloatArray {
+        val channels = ch.coerceAtLeast(1)
+        val frames = srcInterleaved.size / channels
+        if (frames <= 0 || sr <= 0) return FloatArray(0)
+
+        val needFrames = (sr * 10) / 1000  // ≈ 10мс
+        val fromFrame = (frames - needFrames).coerceAtLeast(0)
+        val take = (frames - fromFrame).coerceAtLeast(0)
+
+        if (take == 0) return FloatArray(0)
+
+        val mono = FloatArray(take)
+        var si = fromFrame * channels
+        var i = 0
+        while (i < take) {
+            var acc = 0f
+            var c = 0
+            while (c < channels) { acc += srcInterleaved[si + c]; c++ }
+            mono[i] = acc / channels
+            si += channels
+            i++
+        }
+        return mono
+    }
+
+    /** Ресемпл 10мс-массива до 48кГц и подгон по длине (обычно 480) с линейной интерполяцией. */
+    private fun resampleTo48kAndFit(srcMono: FloatArray, srcRate: Int, dstLen: Int): ShortArray {
+        if (dstLen <= 0) return ShortArray(0)
+        if (srcMono.isEmpty() || srcRate <= 0) return ShortArray(dstLen) // тишина
+
+        // Шаг 1: если sr != 48k — интерполируем к 10мс @ 48k.
+        val needFrames48 = 480  // 10мс при 48кГц
+        val srcFrames10ms = srcMono.size
+        val targetFrames = if (srcRate == 48000) srcFrames10ms else ((srcFrames10ms * 48000.0) / srcRate.toDouble()).toInt().coerceAtLeast(1)
+
+        val tmp48 = FloatArray(targetFrames)
+        val ratio = (srcFrames10ms - 1).toDouble() / (targetFrames - 1).coerceAtLeast(1)
+        var j = 0
+        while (j < targetFrames) {
+            val srcPos = j * ratio
+            val i0 = srcPos.toInt().coerceIn(0, srcFrames10ms - 1)
+            val i1 = kotlin.math.min(i0 + 1, srcFrames10ms - 1)
+            val frac = (srcPos - i0)
+            val s = srcMono[i0] * (1.0 - frac) + srcMono[i1] * frac
+            tmp48[j] = s.toFloat()
+            j++
         }
 
-        // Шаг 2: resample → 48k float[] (линейная интерполяция)
-        val need48k = 48000
-        val resampled = if (srcSampleRate == need48k) mono
-        else {
-            if (mono.isEmpty() || srcSampleRate <= 0) FloatArray(0) else {
-                val ratio = need48k.toDouble() / srcSampleRate.toDouble()
-                val outLen = (mono.size * ratio).roundToInt().coerceAtLeast(1)
-                val out = FloatArray(outLen)
-
-                var j = 0
-                while (j < outLen) {
-                    val srcPos = j / ratio
-                    val i0 = srcPos.toInt().coerceIn(0, mono.size - 1)
-                    val i1 = min(i0 + 1, mono.size - 1)
-                    val frac = (srcPos - i0)
-                    val s = mono[i0] * (1.0 - frac) + mono[i1] * frac
-                    out[j] = s.toFloat()
-                    j++
-                }
-                out
-            }
-        }
-
-        // Шаг 3: подгоняем длину окна к dstLen (обычно 480 на 10мс)
-        val dst = ShortArray(dstLen)
-        if (resampled.isEmpty()) {
-            // тишина
-            return dst
-        }
-
-        // Если длина не совпадает — масштабируем (stretch/compress) простой интерполяцией
-        val ratio = resampled.size.toDouble() / dstLen.toDouble()
+        // Шаг 2: подгоняем точную длину под dstLen (обычно 480)
+        val out = ShortArray(dstLen)
+        val ratio2 = (tmp48.size - 1).toDouble() / (dstLen - 1).coerceAtLeast(1)
         var k = 0
         while (k < dstLen) {
-            val srcPos = k * ratio
-            val i0 = srcPos.toInt().coerceIn(0, resampled.size - 1)
-            val i1 = min(i0 + 1, resampled.size - 1)
-            val frac = (srcPos - i0)
-            val s = resampled[i0] * (1.0 - frac) + resampled[i1] * frac
-            // float [-1..1] → short
-            val v = (s * 32767.0).roundToInt()
-            dst[k] = when {
-                v > Short.MAX_VALUE.toInt() -> Short.MAX_VALUE
-                v < Short.MIN_VALUE.toInt() -> Short.MIN_VALUE
-                else -> v.toShort()
-            }
+            val p = k * ratio2
+            val i0 = p.toInt().coerceIn(0, tmp48.size - 1)
+            val i1 = kotlin.math.min(i0 + 1, tmp48.size - 1)
+            val frac = (p - i0)
+            val s = tmp48[i0] * (1.0 - frac) + tmp48[i1] * frac
+            val v = (s * 32767.0).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+            out[k] = v.toShort()
             k++
         }
-        return dst
+        return out
     }
 }
+
