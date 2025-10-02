@@ -13,6 +13,7 @@ object PlayerPcmBus {
 
     // ===== Ринг-буфер 48 kHz mono =====
     private const val RING_CAP = 48_000  // 1 сек буфер
+
     private val ring = FloatArray(RING_CAP)
     private var writeIdx = 0
     private var filled = 0
