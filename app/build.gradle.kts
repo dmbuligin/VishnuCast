@@ -1,4 +1,4 @@
-import java.time.Instant
+import java.io.File
 import java.time.ZonedDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -8,20 +8,18 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// Безвнешнепроцессный способ получить короткий SHA из .git (совместим с config-cache)
+// Без внешних процессов: короткий SHA из .git (совместим с config-cache)
 fun readGitShortSha(projectDir: File): String {
     return try {
         val headFile = File(projectDir, ".git/HEAD")
         if (!headFile.isFile) return "nogit"
         val head = headFile.readText().trim()
-        val refPrefix = "ref: "
-        val fullSha = if (head.startsWith(refPrefix)) {
-            val ref = head.removePrefix(refPrefix).trim()
-            val refFile = File(projectDir, ".git/$ref")
+        val fullSha = if (head.startsWith("ref:")) {
+            val refPath = head.removePrefix("ref:").trim()
+            val refFile = File(projectDir, ".git/$refPath")
             if (refFile.isFile) refFile.readText().trim() else "nogit"
         } else {
-            // detached HEAD — в HEAD уже полный SHA
-            head
+            head // detached HEAD
         }
         if (fullSha.length >= 7) fullSha.take(7) else fullSha
     } catch (_: Exception) {
@@ -29,9 +27,7 @@ fun readGitShortSha(projectDir: File): String {
     }
 }
 
-// Гит-SHA и время сборки (UTC). Безопасно работают и вне git (вернётся "local").
 val gitSha: String = readGitShortSha(rootProject.projectDir)
-//val buildTimeUtc: String = Instant.now().toString()
 val buildTimeUtc: String = ZonedDateTime.now(ZoneOffset.UTC)
     .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'"))
 
@@ -39,15 +35,11 @@ android {
     namespace = "com.buligin.vishnucast"
     compileSdk = 36
 
-
+    // Версии приложения
     val versionMajor = 2
     val versionMinor = 0
     val versionPatch = 2
-
-    // versionName = "1.7.0"
     val verName = "$versionMajor.$versionMinor.$versionPatch"
-    // versionCode = 306  (3*100 + 6)
-    //val verCode = versionMajor * 100 + versionMinor
     val verCode = versionMajor * 10000 + versionMinor * 100 + versionPatch
 
     defaultConfig {
@@ -58,36 +50,26 @@ android {
         versionCode = verCode
         versionName = verName
 
-        // Поля для экрана "About"
+        // Поля About
         buildConfigField("String", "BUILD_SHA", "\"$gitSha\"")
         buildConfigField("String", "BUILD_TIME", "\"$buildTimeUtc\"")
         buildConfigField("String", "APP_VERSION", "\"$verName\"")
 
-        defaultConfig {
-            vectorDrawables { useSupportLibrary = true }
-        }
-    }
+        vectorDrawables { useSupportLibrary = true }
 
-    defaultConfig {
-        // ...
-        externalNativeBuild {
-            cmake {
-                // На будущее можно выставлять дефайны через -D...
-            }
-        }
+        // ABI под vcmix (можно расширить при необходимости)
         ndk {
-            // Сузим ABI под нужды (можно расширить при желании)
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")
         }
     }
 
+    // Подключаем CMake-проект (JNI-каркас vcmix)
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
         }
     }
-
 
     buildFeatures {
         buildConfig = true
@@ -114,38 +96,31 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-
-
-
-
-
-
-
 }
 
-
 dependencies {
-    // AndroidX
+    // AndroidX / Material
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.9.2")
     implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+
     // Встроенный HTTP+WS сервер
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation("org.nanohttpd:nanohttpd-websocket:2.3.1")
+
     // QR-коды
     implementation("com.google.zxing:core:3.5.3")
+
     // WebRTC
     implementation("io.github.webrtc-sdk:android:137.7151.03")
-    testImplementation("org.junit.jupiter:junit-jupiter-api:5.13.4")
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.13.4")
-    implementation("com.google.android.material:material:1.12.0")
-    implementation("androidx.work:work-runtime-ktx:2.9.0")
-    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+
+    // ExoPlayer
     implementation("com.google.android.exoplayer:exoplayer:2.19.1")
 
-
-
-
-
+    // Tests (JUnit 5)
+    testImplementation("org.junit.jupiter:junit-jupiter-api:5.13.4")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.13.4")
 }
