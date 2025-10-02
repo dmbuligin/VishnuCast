@@ -111,6 +111,7 @@ class WebRtcCore(private val ctx: Context) {
     /** Фабрика ADM с учётом флага Mix 2.0. Пока MixedADM делегирует в JavaADM (поведение не меняется). */
     private fun buildAudioDeviceModule(appContext: Context): org.webrtc.audio.AudioDeviceModule {
         // Общий SamplesReadyCallback — валидация микса (без подмены звука)
+
         val samplesCb = object : JavaAudioDeviceModule.SamplesReadyCallback {
             override fun onWebRtcAudioRecordSamplesReady(samples: JavaAudioDeviceModule.AudioSamples?) {
                 if (samples == null) return
@@ -121,6 +122,10 @@ class WebRtcCore(private val ctx: Context) {
 
                     // Вычисляем смесь (Mono 48 kHz, длина = длине mic буфера)
                     val mixed = MixerEngine.mixMicWithPlayer48kMono(mic, a)
+
+                    if (com.buligin.vishnucast.audio.MixWavDumper.enabled) {
+                        com.buligin.vishnucast.audio.MixWavDumper.push(mixed)
+                    }
 
                     // Sanity-проверка форматов — логируем только при несоответствии
                     if (mixed.size != mic.size || samples.sampleRate != 48000 || samples.channelCount != 1) {

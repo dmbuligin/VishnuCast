@@ -12,7 +12,14 @@
         android:id="@+id/action_mix20"
         android:title="@string/cast_menu_mix20"
         android:checkable="true"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_mix_dump"
+        android:title="@string/cast_menu_mix_dump"
+        android:checkable="true"
         android:showAsAction="never" />
+
 
 
     <item

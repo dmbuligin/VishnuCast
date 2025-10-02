@@ -130,6 +130,8 @@
 
     <!--Tests-->
     <string name="cast_menu_mix20">Mix 2.0 (Mic+Player)</string>
+    <string name="cast_menu_mix_dump">Dump mix to WAV</string>
+
 
 
 </resources>

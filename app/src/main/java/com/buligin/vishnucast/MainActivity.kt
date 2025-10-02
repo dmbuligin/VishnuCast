@@ -387,7 +387,7 @@ class MainActivity : AppCompatActivity() {
         val mixItem = menu.findItem(R.id.action_mix20)
         mixItem?.isChecked = WebRtcCore.MIX20_ENABLED
 
-
+        menu.findItem(R.id.action_mix_dump)?.isChecked = com.buligin.vishnucast.audio.MixWavDumper.enabled
 
         return true
     }
@@ -415,6 +415,20 @@ class MainActivity : AppCompatActivity() {
                 Toast.LENGTH_SHORT
             ).show()
             updateMixBadge()
+            true
+        }
+
+        R.id.action_mix_dump -> {
+            val newVal = !item.isChecked
+            item.isChecked = newVal
+            if (newVal) {
+                val f = com.buligin.vishnucast.audio.MixWavDumper.start(this)
+                Toast.makeText(this, if (f != null) "Dump ON: ${f.name}" else "Dump start failed", Toast.LENGTH_SHORT)
+                    .show()
+            } else {
+                com.buligin.vishnucast.audio.MixWavDumper.stop()
+                Toast.makeText(this, "Dump OFF", Toast.LENGTH_SHORT).show()
+            }
             true
         }
 
