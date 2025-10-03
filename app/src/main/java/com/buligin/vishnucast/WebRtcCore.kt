@@ -574,8 +574,8 @@ class WebRtcCore(private val ctx: Context) {
 
 
         /** План B: источник WebRTC (жёсткий переключатель). Пока используется только как настройка. */
-        @Volatile var WEBRTC_SOURCE: com.buligin.vishnucast.audio.WebRtcSource =
-            com.buligin.vishnucast.audio.WebRtcSource.MIC
+        @Volatile var WEBRTC_SOURCE: com.buligin.vishnucast.audio.WebRtcSource = WebRtcSource.MIC
+    //    @Volatile var WEBRTC_SOURCE: WebRtcSource = WebRtcSource.PLAYER
 
         fun setWebRtcSource(src: com.buligin.vishnucast.audio.WebRtcSource) {
             WEBRTC_SOURCE = src

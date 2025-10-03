@@ -31,9 +31,9 @@ target_link_libraries(
 
 add_library(vishnuadm SHARED vishnu_adm.cc)
 
+# STUB-линковка без WebRTC: so не нужна, т.к. мы не используем webrtc-символы
 target_link_libraries(
         vishnuadm
-        jingle_peerconnection_so
         ${log-lib}
         ${android-lib}
 )
