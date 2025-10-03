@@ -71,6 +71,13 @@ android {
         }
     }
 
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+
     buildFeatures {
         buildConfig = true
     }

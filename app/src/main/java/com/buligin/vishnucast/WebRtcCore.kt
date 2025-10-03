@@ -24,6 +24,9 @@ import com.buligin.vishnucast.service.MixerState               // B1: наблю
 import com.buligin.vishnucast.audio.MixerEngine               // 4.1: «сухой» прогон микса Mic+Player
 import com.buligin.vishnucast.audio.MixedAudioDeviceModule    // 4.2: каркас Mixed ADM (делегат)
 import org.webrtc.audio.AudioDeviceModule
+import com.buligin.vishnucast.audio.NativeAdm
+import com.buligin.vishnucast.audio.WebRtcSource
+
 
 
 
@@ -71,6 +74,8 @@ class WebRtcCore(private val ctx: Context) {
         // Создаём ADM через фабричную функцию — с учетом флага Mix 2.0
         adm = buildAudioDeviceModule(ctx)
 
+
+
         val options = PeerConnectionFactory.Options().apply {
             disableNetworkMonitor = true // «золотой» флаг
         }
@@ -108,97 +113,32 @@ class WebRtcCore(private val ctx: Context) {
         startGuardTimer()
     }
 
-    /** Фабрика ADM с учётом флага Mix 2.0. Пока MixedADM делегирует в JavaADM (поведение не меняется). */
+    /** Фабрика ADM с у */
     private fun buildAudioDeviceModule(appContext: Context): org.webrtc.audio.AudioDeviceModule {
-        // Общий SamplesReadyCallback — валидация микса (без подмены звука)
-
-        val samplesCb = object : JavaAudioDeviceModule.SamplesReadyCallback {
-
-            override fun onWebRtcAudioRecordSamplesReady(samples: JavaAudioDeviceModule.AudioSamples?) {
-                if (samples == null) return
-                try {
-                    if (samples.audioFormat != AudioFormat.ENCODING_PCM_16BIT) return
-
-                    // 1) mic → гарантированно @48k mono 10-мс окно (ShortArray)
-                    val mic48Mono: ShortArray = ensure48kMono(
-                        samples.data,           // ByteArray PCM16 LE
-                        samples.sampleRate,     // реальная ЧД от ADM
-                        samples.channelCount    // реальные каналы от ADM
-                    )
-
-                    // 2) α из MixerState (0..1)
-                    val a = (MixerState.alpha01.value ?: 0f).coerceIn(0f, 1f)
-
-                    // 3) считаем смесь (Mic+Player) уже в @48k mono
-                    val mixed: ShortArray = MixerEngine.mixMicWithPlayer48kMono(mic48Mono, a)
-
-                    // 4) дамп — по флагам диагностики
-                    if (com.buligin.vishnucast.audio.MixWavDumper.enabled) {
-
-                        when {
-                            DUMP_PLAYER_ONLY -> {
-                                val next = com.buligin.vishnucast.audio.PlayerPcmBus.take48kMono(mic48Mono.size, 300L)
-                                if (next != null) {
-                                    com.buligin.vishnucast.audio.MixWavDumper.push(float48ToShort(next))
-                                } else {
-                                    com.buligin.vishnucast.audio.MixWavDumper.push(ShortArray(mic48Mono.size))
-                                }
-                            }
-                            DUMP_MIC_ONLY -> {
-                                com.buligin.vishnucast.audio.MixWavDumper.push(mic48Mono)
-                            }
-                            else -> {
-                                // Для микса тоже возьмём последовательный плеерный блок
-                                val next = com.buligin.vishnucast.audio.PlayerPcmBus.take48kMono(mic48Mono.size, 300L)
-                                val mixed = if (next != null) {
-                                    // переводим float→short и смешиваем
-                                    val playerShort = float48ToShort(next)
-                                    com.buligin.vishnucast.audio.MixerEngine.mixMicWithPlayer48kMono(mic48Mono, a)
-                                } else {
-                                    // плеер пуст — чистый микрофон
-                                    mic48Mono.copyOf()
-                                }
-                                com.buligin.vishnucast.audio.MixWavDumper.push(mixed)
-                            }
-                        }
-
-                    }
-
-
-                    // sanity-лог один раз при расхождении
-                    if (mixed.size != mic48Mono.size) {
-                        Log.w(TAG, "Mixer sanity: mic[${mic48Mono.size}] → mixed[${mixed.size}]")
-                    }
-                } catch (t: Throwable) {
-                    Log.w(TAG, "mixMicWithPlayer48kMono error: ${t.message}")
+        return if (WEBRTC_SOURCE == WebRtcSource.PLAYER) {
+            // Нативный ADM, который отдаёт кадры из PlayerPcmBus
+            NativeAdm.createPlayerOnlyAdm(appContext)
+                ?: run {
+                    android.util.Log.w(TAG, "Native ADM unavailable, falling back to Java ADM (MIC)")
+                    defaultJavaAdm(appContext) // твой прежний builder JavaAudioDeviceModule
                 }
-            }
-
-
-        }
-
-        return if (MIX20_ENABLED) {
-            // Каркас MixedADM (делегирует в JavaADM). Позже здесь включим JNI-подмену буфера.
-            MixedAudioDeviceModule.builder(appContext)
-                .setUseHardwareAcousticEchoCanceler(false)
-                .setUseHardwareNoiseSuppressor(false)
-                .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-                .setUseStereoInput(false)
-                .setUseStereoOutput(false)
-                .setSamplesReadyCallback(samplesCb)
-                .createAudioDeviceModule()
         } else {
-            // Обычный JavaADM (как раньше)
-            JavaAudioDeviceModule.builder(appContext)
-                .setUseHardwareAcousticEchoCanceler(false)
-                .setUseHardwareNoiseSuppressor(false)
-                .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-                .setUseStereoInput(false)
-                .setUseStereoOutput(false)
-                .setSamplesReadyCallback(samplesCb)
-                .createAudioDeviceModule()
+            // MIC — обычный Java ADM (как было)
+            defaultJavaAdm(appContext)
         }
     }
+
+    /** «Золотой» Java ADM для MIC. */
+    private fun defaultJavaAdm(context: Context): AudioDeviceModule {
+        return JavaAudioDeviceModule.builder(context)
+            .setUseHardwareAcousticEchoCanceler(false)
+            .setUseHardwareNoiseSuppressor(false)
+            .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+            .setUseStereoInput(false)
+            .setUseStereoOutput(false)
+            .createAudioDeviceModule()
+    }
+
 
     // Конвертер ByteArray(LE, PCM16) → ShortArray
     private fun bytesLeToShorts(src: ByteArray): ShortArray {
