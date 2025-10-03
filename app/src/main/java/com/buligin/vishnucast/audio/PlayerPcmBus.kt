@@ -110,10 +110,11 @@ object PlayerPcmBus {
     }
 
     /**
-     * Возвращает СЛЕДУЮЩИЕ n сэмплов из кольца (строгое окно @48k mono).
-     * Первый вызов: если readIdx == -1 (сентинел), выравниваем так, чтобы окно
-     * оканчивалось в writeIdx (т.е. берём "последние n" уже записанных сэмплов).
-     * readIdx продвигаем ТОЛЬКО при полном успешном чтении n.
+     * Возвращает СЛЕДУЮЩИЕ n сэмплов из кольца (строго последовательное окно).
+     * Если на момент вызова доступно < n, может ждать до waitMs (мелкие ожидания)
+     * и вернёт null, НЕ продвигая readIdx — чтобы не «надкусить» полукадр.
+     *
+     * ВАЖНО: readIdx продвигается ТОЛЬКО при успешном полном чтении n сэмплов.
      */
     fun take48kMono(n: Int, waitMs: Long = 0L): FloatArray? {
         if (n <= 0) return FloatArray(0)
@@ -121,53 +122,44 @@ object PlayerPcmBus {
         val deadline = if (waitMs > 0L) (System.currentTimeMillis() + waitMs) else Long.MIN_VALUE
 
         while (true) {
-            var r = readIdx
+            // Снимок курсоров
+            val r = readIdx
             val w = writeIdx
 
-            // Сколько реально доступно сейчас
-            val available = if (r >= 0) {
-                if (w >= r) (w - r) else (RING_CAP - (r - w))
-            } else {
-                // Пока не инициализировались, считаем объём записи целиком
-                w // допущение: writer стартует с 0 и только растёт мод RING_CAP
-            }
+            // Сколько реально доступно в кольце прямо сейчас
+            val available = if (w >= r) (w - r) else (RING_CAP - (r - w))
 
-            // Если первый запуск (r==-1): ждём пока соберётся хотя бы n, затем выравниваем
-            if (r < 0) {
-                if (available < n) {
-                    if (waitMs <= 0L || System.currentTimeMillis() >= deadline) return null
-                    try { Thread.sleep(1) } catch (_: InterruptedException) { return null }
-                    continue
-                }
-                // Стартовый r так, чтобы окно длиной n заканчивалось в w
-                r = (w - n) % RING_CAP
-                if (r < 0) r += RING_CAP
-                // Фиксируем старт
-                readIdx = r
-            }
-
-            // Отсюда r гарантированно в [0, RING_CAP)
-            val availNow = if (w >= r) (w - r) else (RING_CAP - (r - w))
-            if (availNow >= n) {
+            if (available >= n) {
+                // Можем читать одним или двумя кусками (с учётом обёртки)
                 val out = FloatArray(n)
                 val firstPart = minOf(n, RING_CAP - r)
+                // копируем первую часть
                 System.arraycopy(ring, r, out, 0, firstPart)
+
                 val remain = n - firstPart
                 if (remain > 0) {
+                    // обёртка: копируем хвост с начала буфера
                     System.arraycopy(ring, 0, out, firstPart, remain)
                 }
+
+                // АТОМАРНО сдвигаем readIdx на n (с корректным модулем)
                 readIdx = (r + n) % RING_CAP
+
                 return out
             }
 
+            // Недостаточно — либо подождать, либо вернуть null
             if (waitMs <= 0L || System.currentTimeMillis() >= deadline) {
                 return null
             } else {
-                try { Thread.sleep(1) } catch (_: InterruptedException) { return null }
+                try {
+                    Thread.sleep(1) // мелкая уступка планировщику
+                } catch (_: InterruptedException) {
+                    return null
+                }
             }
         }
     }
-
 
 
     /** Для быстрых срезов (индикаторы), НЕ непрерывное чтение. */
