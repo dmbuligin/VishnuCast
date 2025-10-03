@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_library(log-lib     log)
 find_library(android-lib android)
 
-# ---- Существующая библиотека (не трогаю) ----
+
 add_library(
         vcmix
         SHARED
@@ -28,19 +28,9 @@ target_link_libraries(
         ${android-lib}
 )
 
-# ---- НОВАЯ библиотека для B2-native: vishnuadm ----
-# Минимальный ADM для режима PLAYER (10 мс @ 48k mono из PlayerPcmBus через JNI)
-add_library(
-        vishnuadm
-        SHARED
-        src/main/cpp/vishnu_adm.cc
-)
 
-# Если у тебя есть общий каталог инклюдов WebRTC, добавь его здесь:
-# target_include_directories(vishnuadm PRIVATE ${WEBRTC_INCLUDE_DIRS})
+add_library(vishnuadm SHARED vishnu_adm.cc)
 
-# Основная webrtc so в типовых сборках называется jingle_peerconnection_so
-# Если у тебя другое имя — замени ниже на свой таргет.
 target_link_libraries(
         vishnuadm
         jingle_peerconnection_so
