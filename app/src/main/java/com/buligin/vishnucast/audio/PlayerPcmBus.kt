@@ -128,8 +128,13 @@ object PlayerPcmBus {
                 seqActive = true
             }
 
-            // Проверка доступности
-            if (filled < n) return null
+            // Доступность: реальная дистанция от readIdx до writeIdx в кольце
+            val available = if (writeIdx >= readIdx) {
+                writeIdx - readIdx
+            } else {
+                RING_CAP - (readIdx - writeIdx)
+            }
+            if (available < n) return null
 
             val out = FloatArray(n)
             val start = readIdx
