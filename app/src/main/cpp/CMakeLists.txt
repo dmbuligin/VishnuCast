@@ -13,7 +13,6 @@ find_library(android-lib android)
 add_library(
         vcmix
         SHARED
-        mix_adm_jni.cc
         mix_adm_stub.cc
 )
 
