@@ -110,45 +110,57 @@ object PlayerPcmBus {
     }
 
     /**
-     * Выдать СЛЕДУЮЩИЕ n сэмплов @48k mono из кольца (не «хвост», а непрерывный поток).
-     * Если данных пока мало — вернём null (можно подложить тишину и подождать).
+     * Возвращает СЛЕДУЮЩИЕ n сэмплов из кольца (строго последовательное окно).
+     * Если на момент вызова доступно < n, может ждать до waitMs (мелкие ожидания)
+     * и вернёт null, НЕ продвигая readIdx — чтобы не «надкусить» полукадр.
+     *
+     * ВАЖНО: readIdx продвигается ТОЛЬКО при успешном полном чтении n сэмплов.
      */
-    fun take48kMono(n: Int, maxAgeMs: Long = 300L): FloatArray? {
-        if (n <= 0) return null
-        synchronized(lock) {
-            val age = System.currentTimeMillis() - lastWriteAtMs
-            if (age > maxAgeMs || filled == 0) return null
+    fun take48kMono(n: Int, waitMs: Long = 0L): FloatArray? {
+        if (n <= 0) return FloatArray(0)
 
-            // Инициализируем курсор так, чтобы первый блок заканчивался в текущем writeIdx
-            if (readIdx < 0 || !seqActive) {
-                val end = writeIdx
-                var start = end - n
-                if (start < 0) start += RING_CAP
-                readIdx = start
-                seqActive = true
+        val deadline = if (waitMs > 0L) (System.currentTimeMillis() + waitMs) else Long.MIN_VALUE
+
+        while (true) {
+            // Снимок курсоров
+            val r = readIdx
+            val w = writeIdx
+
+            // Сколько реально доступно в кольце прямо сейчас
+            val available = if (w >= r) (w - r) else (RING_CAP - (r - w))
+
+            if (available >= n) {
+                // Можем читать одним или двумя кусками (с учётом обёртки)
+                val out = FloatArray(n)
+                val firstPart = minOf(n, RING_CAP - r)
+                // копируем первую часть
+                System.arraycopy(ring, r, out, 0, firstPart)
+
+                val remain = n - firstPart
+                if (remain > 0) {
+                    // обёртка: копируем хвост с начала буфера
+                    System.arraycopy(ring, 0, out, firstPart, remain)
+                }
+
+                // АТОМАРНО сдвигаем readIdx на n (с корректным модулем)
+                readIdx = (r + n) % RING_CAP
+
+                return out
             }
 
-            // Доступность: реальная дистанция от readIdx до writeIdx в кольце
-            val available = if (writeIdx >= readIdx) {
-                writeIdx - readIdx
+            // Недостаточно — либо подождать, либо вернуть null
+            if (waitMs <= 0L || System.currentTimeMillis() >= deadline) {
+                return null
             } else {
-                RING_CAP - (readIdx - writeIdx)
+                try {
+                    Thread.sleep(1) // мелкая уступка планировщику
+                } catch (_: InterruptedException) {
+                    return null
+                }
             }
-            if (available < n) return null
-
-            val out = FloatArray(n)
-            val start = readIdx
-            if (start + n <= RING_CAP) {
-                System.arraycopy(ring, start, out, 0, n)
-            } else {
-                val first = RING_CAP - start
-                System.arraycopy(ring, start, out, 0, first)
-                System.arraycopy(ring, 0, out, first, n - first)
-            }
-            readIdx = (readIdx + n) % RING_CAP
-            return out
         }
     }
+
 
     /** Для быстрых срезов (индикаторы), НЕ непрерывное чтение. */
     fun tail48kMono(tailSamples: Int, maxAgeMs: Long = 300L): FloatArray? {
