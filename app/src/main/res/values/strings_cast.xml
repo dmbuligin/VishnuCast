@@ -45,7 +45,7 @@
     <string name="about_text">
     VishnuCast is a lightweight mobile WebRTC audio caster with a built-in HTTP/WebSocket server and a minimal web client.\nA simple and convenient alternative to a radio microphone for lecturers or tour guides.
 </string>
-    <string name="about_respect">Created in deep respect for my Guru Vishnu Sharan Shukla\nhttps://yogasanskar.ru/</string>
+    <string name="about_respect">Created in deep respect for my\nGuru Vishnu Sharan Shukla\nhttps://yogasanskar.ru/</string>
     <string name="about_footer"> Project by Mr. Dima, with AI collaboration\nhttps://github.com/dmbuligin</string>
     <string name="about_version_fmt">Version: %1$s (code %2$d)\nBuild: %3$s @ %4$s</string>
     <string name="menu_share">Share link</string>

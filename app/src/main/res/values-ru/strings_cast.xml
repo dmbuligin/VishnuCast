@@ -45,7 +45,7 @@
     <string name="about_text">
     VishnuCast — лёгкий мобильный WebRTC-кастер аудио со встроенным HTTP/WebSocket-сервером и минимальным веб-клиентом.\nПростая и удобная альтернатива радиомикрофону для лекторов или эксурсоводов.
 </string>
-    <string name="about_respect">Создано в знак глубокого уважения к моему Гуру Вишну Шаран Шукла\nhttps://yogasanskar.ru/</string>
+    <string name="about_respect">Создано в знак глубокого уважения к моему\nГуру Вишну Шаран Шукла\nhttps://yogasanskar.ru/</string>
     <string name="about_footer"> Project by Mr. Dima, with AI collaboration\nhttps://github.com/dmbuligin</string>
     <string name="about_version_fmt">Версия: %1$s (код %2$d)\nСборка: %3$s @ %4$s</string>
     <string name="menu_share">Поделиться ссылкой</string>
