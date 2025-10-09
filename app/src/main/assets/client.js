@@ -137,7 +137,8 @@
 
 // --- WebAudio mixer state (MIC + PLAYER) ---
 var mix = { alpha: 0.0, micMuted: false };
-var ac = null, gainMic = null, gainPlayer = null, srcMic = null, srcPlayer = null;
+var ac = null, gainMic = null, gainPlayer = null, srcMic = null, srcPlayer = null, mixOut = null;
+
 
 function ensureMixer() {
   try {
@@ -150,8 +151,37 @@ function ensureMixer() {
     }
     if (!ac) return false;
 
-    if (!gainMic)   { gainMic   = ac.createGain();   gainMic.gain.value = 1.0; gainMic.connect(ac.destination); }
-    if (!gainPlayer){ gainPlayer= ac.createGain();   gainPlayer.gain.value = 0.0; gainPlayer.connect(ac.destination); }
+// Создаём гейны, но пока никуда не коннектим
+if (!gainMic)    { gainMic    = ac.createGain();   gainMic.gain.value = 1.0; }
+if (!gainPlayer) { gainPlayer = ac.createGain();   gainPlayer.gain.value = 0.0; }
+
+// Миксуем в MediaStreamDestination и подаём в <audio>
+if (!mixOut) {
+  mixOut = ac.createMediaStreamDestination();
+  // Коннектим гейны в выход
+  try { gainMic.connect(mixOut); } catch(_) {}
+  try { gainPlayer.connect(mixOut); } catch(_) {}
+
+  // Готовим <audio> к воспроизведению микса
+  if (audioEl) {
+    audioEl.setAttribute('playsinline', '');
+    audioEl.setAttribute('autoplay', '');
+    audioEl.muted = false;
+    audioEl.volume = 1.0;
+    try { audioEl.srcObject = mixOut.stream; } catch(e) { log('audio mixOut.srcObject error:', e && e.message); }
+
+    // Надёжный kick для autoplay
+    var tries = 0;
+    (function kick(){
+      audioEl.play().then(function(){ log('audio.play OK (mixOut)'); }).catch(function(err){
+        tries++;
+        log('audio.play FAIL (mixOut) try', tries, err && err.message);
+        if (tries < 5) setTimeout(kick, 300);
+      });
+    })();
+  }
+}
+
 
     updateGains();
     return true;
@@ -465,6 +495,9 @@ function updateGains() {
     var conf = { iceServers: [] };
     pc = new RTCPeerConnection(conf);
     log('PC created');
+
+    // Ранний запуск микшера → <audio> уже готов, когда прилетят треки
+    ensureMixer();
 
     try {
       pc.addTransceiver('audio', { direction: 'recvonly' });
