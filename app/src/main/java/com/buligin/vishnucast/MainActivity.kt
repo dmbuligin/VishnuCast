@@ -110,11 +110,23 @@ class MainActivity : AppCompatActivity() {
             if (!granted) {
                 Toast.makeText(this, getString(R.string.permission_denied), Toast.LENGTH_SHORT).show()
                 pendingUnmute = false
-            } else if (pendingUnmute) {
-                setMicEnabled(true)
-                pendingUnmute = false
+                return@registerForActivityResult
             }
+
+            // Разрешение выдано впервые → пересобираем аудиостек без убийства процесса.
+            try {
+                val stop = Intent(this, CastService::class.java).setAction(CastService.ACTION_STOP)
+                if (Build.VERSION.SDK_INT >= 26) startForegroundService(stop) else startService(stop)
+            } catch (_: Throwable) { /* no-op */ }
+
+            // Небольшая задержка, чтобы сервис успел сняться, затем — заново поднять.
+            Handler(Looper.getMainLooper()).postDelayed({
+                CastService.ensureStarted(applicationContext)
+                if (pendingUnmute) setMicEnabled(true)
+                pendingUnmute = false
+            }, 200)
         }
+
 
     private val requestPostNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
