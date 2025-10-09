@@ -94,8 +94,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateInputBadge() {
-        val usb = isUsbMicConnected()
-        val iconRes = if (usb) R.drawable.ic_headset_mic_24 else R.drawable.ic_mic_24
+        // Уже есть в классе:
+        // private lateinit var audioManager: AudioManager
+        // fun isUsbMicConnected(): Boolean = ...
+
+        // 1) USB-микрофон как было
+        val hasUsbMic = isUsbMicConnected()
+
+        // 2) Проводная гарнитура с микрофоном (3.5 мм, TRRS):
+        // Входное устройство TYPE_WIRED_HEADSET присутствует только когда есть микрофон.
+        val hasWiredHeadsetMic = try {
+            val inputs = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+            inputs.any { it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET }
+        } catch (_: Throwable) {
+            false
+        }
+
+        val isHeadsetInput = hasUsbMic || hasWiredHeadsetMic
+
+        val iconRes = if (isHeadsetInput) R.drawable.ic_headset_mic_24 else R.drawable.ic_mic_24
         val icon = ContextCompat.getDrawable(this, iconRes)
         val size = dp(32)
         icon?.setBounds(0, 0, size, size)
@@ -103,6 +120,7 @@ class MainActivity : AppCompatActivity() {
         tvStatus.compoundDrawablePadding = dp(8)
         TextViewCompat.setCompoundDrawableTintList(tvStatus, ColorStateList.valueOf(Color.parseColor("#6B7280")))
     }
+
 
     // ===== Permissions =====
     private val requestRecordAudio =
