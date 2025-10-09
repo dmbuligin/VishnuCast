@@ -312,8 +312,8 @@ class SignalingSocket(
             } else {
                 // PLAYER
                 listOf(
-                    "stereo=2",
-                    "sprop-stereo=2",
+                    "stereo=1",
+                    "sprop-stereo=1",
                     "maxaveragebitrate=128000",
                     "usedtx=0",
                     "cbr=1",

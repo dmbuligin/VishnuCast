@@ -380,6 +380,12 @@
       log('WS keep-alive ← pong', (rtt != null ? ('RTT≈' + rtt + 'ms') : ''), (msg.ts ? ('srvTs=' + msg.ts) : ''));
       return;
     }
+    // Простой ACK от сервера за оффер — игнорируем
+    if (msg && typeof msg === 'object' && msg.type === 'ack') {
+    log('WS ack:', msg.stage || '');
+        return;
+    }
+
       log('Signal: unrecognized payload');
     } catch (e){
       log('Signal handling error:', e);
@@ -417,9 +423,9 @@
 
     try {
       pc.addTransceiver('audio', { direction: 'recvonly' });
-      log('PC addTransceiver recvonly(audio)');
+      log('PC addTransceiver recvonly(audio)-1');
       pc.addTransceiver('audio', { direction: 'recvonly' }); // второй аудио-трансивер для PLAYER
-
+      log('PC addTransceiver recvonly(audio)-2');
     } catch(e){
       log('addTransceiver error:', e && e.message);
     }
