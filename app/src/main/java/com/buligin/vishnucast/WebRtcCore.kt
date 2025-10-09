@@ -31,6 +31,10 @@ class WebRtcCore(private val ctx: Context) {
     private val factory: PeerConnectionFactory
     private val audioSource: AudioSource
     private val audioTrack: AudioTrack
+
+    private val playerSource: AudioSource
+    private val playerTrack: AudioTrack
+
     private val connectedPeerCount = AtomicInteger(0)
     private val muted = AtomicBoolean(true)
 
@@ -88,6 +92,22 @@ class WebRtcCore(private val ctx: Context) {
         audioSource = factory.createAudioSource(audioConstraints)
         audioTrack  = factory.createAudioTrack("ARDAMSa0", audioSource)
         audioTrack.setEnabled(true)
+
+
+        val playerConstraints = MediaConstraints().apply {
+            optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "false"))
+            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "false"))
+            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "false"))
+            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl2", "false"))
+            optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "false"))
+        }
+        playerSource = factory.createAudioSource(playerConstraints)
+        playerTrack  = factory.createAudioTrack("VC_PLAYER_0", playerSource)
+        playerTrack.setEnabled(true)
+
+
+
+
 
         // Стартуем в mute → «пустой поток»
         adm.setMicrophoneMute(true)
@@ -284,6 +304,10 @@ class WebRtcCore(private val ctx: Context) {
 
         val sender = pc.addTrack(audioTrack, listOf("vishnu_audio_stream"))
         d("createPeerConnection: addTrack sender=${sender != null}")
+
+        val senderPlayer = pc.addTrack(playerTrack, listOf("vishnu_player_stream"))
+        d("createPeerConnection: addTrack PLAYER sender=${senderPlayer != null}")
+
 
         pendingPeerCount.incrementAndGet()
         statsPc = pc

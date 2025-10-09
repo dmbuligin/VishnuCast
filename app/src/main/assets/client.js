@@ -418,6 +418,8 @@
     try {
       pc.addTransceiver('audio', { direction: 'recvonly' });
       log('PC addTransceiver recvonly(audio)');
+      pc.addTransceiver('audio', { direction: 'recvonly' }); // второй аудио-трансивер для PLAYER
+
     } catch(e){
       log('addTransceiver error:', e && e.message);
     }

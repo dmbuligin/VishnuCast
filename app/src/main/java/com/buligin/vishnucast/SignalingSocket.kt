@@ -11,7 +11,6 @@ import java.util.TimerTask
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-
 /** Глобальный холдер единственного WebRtcCore на процесс */
 object WebRtcCoreHolder {
     @Volatile private var instance: WebRtcCore? = null
@@ -158,11 +157,26 @@ class SignalingSocket(
         pcLocal.setRemoteDescription(object : SdpObserver {
             override fun onSetSuccess() {
                 pcLocal.createAnswer(object : SdpObserver {
+                    // createAnswer → onCreateSuccess
                     override fun onCreateSuccess(desc: SessionDescription) {
+                        // SDP-мунжинг: opus-only + разные профили для MIC (#0) и PLAYER (#1)
+                        val mungedSdp = try {
+                            mungeOpusAnswer(desc.description)
+                        } catch (_: Throwable) {
+                            desc.description // не валим сессию, если что-то пошло не так
+                        }
+                        val munged = SessionDescription(desc.type, mungedSdp)
+
+                        // setLocalDescription уже с подменённым SDP
                         pcLocal.setLocalDescription(object : SdpObserver {
                             override fun onSetSuccess() {
                                 try {
-                                    send(JSONObject().put("type", "answer").put("sdp", desc.description).toString())
+                                    send(
+                                        JSONObject()
+                                            .put("type", "answer")
+                                            .put("sdp", mungedSdp)
+                                            .toString()
+                                    )
                                 } catch (_: Throwable) {}
                             }
                             override fun onSetFailure(p0: String?) {
@@ -170,8 +184,9 @@ class SignalingSocket(
                             }
                             override fun onCreateSuccess(p0: SessionDescription?) {}
                             override fun onCreateFailure(p0: String?) {}
-                        }, desc)
+                        }, munged)
                     }
+
                     override fun onCreateFailure(p0: String?) {
                         try { send(JSONObject().put("type", "error").put("message", "createAnswer").toString()) } catch (_: Throwable) {}
                     }
@@ -211,5 +226,152 @@ class SignalingSocket(
     private fun stopPolling() {
         try { pollTimer?.cancel() } catch (_: Throwable) {}
         pollTimer = null
+    }
+
+    // ====== SDP MUNGE ======
+    // Принудительный Opus-профиль на две m=audio:
+    //  - m=audio #0 (MIC): 64 kbps, ptime=20, DTX on, CBR, FEC off
+    //  - m=audio #1 (PLAYER): 128 kbps, ptime=40, DTX off, CBR, FEC off
+    private fun mungeOpusAnswer(sdpIn: String): String {
+        val sdp = sdpIn.replace("\r\n", "\n")
+        val lines = sdp.split("\n")
+
+        val headers = StringBuilder()
+        val sections = mutableListOf<StringBuilder>()
+        var cur = StringBuilder()
+        var seenMedia = false
+
+        for (ln in lines) {
+            if (ln.startsWith("m=")) {
+                if (!seenMedia) {
+                    headers.append(cur.toString())
+                    cur = StringBuilder()
+                    seenMedia = true
+                } else {
+                    sections.add(cur)
+                    cur = StringBuilder()
+                }
+            }
+            cur.append(ln).append('\n')
+        }
+        if (!seenMedia) return sdpIn
+        if (cur.isNotEmpty()) sections.add(cur)
+
+        fun processAudioSection(body: String, index: Int): String {
+            val ls = body.trim('\n').split("\n").toMutableList()
+            var mLineIdx = -1
+            var opusPt: String? = null
+            val toRemoveIdx = mutableSetOf<Int>()
+
+            for (i in ls.indices) {
+                val l = ls[i]
+                if (l.startsWith("m=audio ")) mLineIdx = i
+                val m = Regex("""^a=rtpmap:(\d+)\s+opus/48000/2""").find(l)
+                if (m != null) opusPt = m.groupValues[1]
+            }
+            if (mLineIdx < 0 || opusPt == null) return body
+
+            // Оставляем в m-line только opus PT
+            run {
+                val m = ls[mLineIdx]
+                val parts = m.split(" ").toMutableList()
+                if (parts.size >= 4) {
+                    val keep = mutableListOf<String>()
+                    keep.add(parts[0]) // m=audio
+                    keep.add(parts[1]) // <port>
+                    keep.add(parts[2]) // RTP/SAVPF
+                    keep.add(parts[3]) // proto
+                    keep.add(opusPt!!)
+                    ls[mLineIdx] = keep.joinToString(" ")
+                }
+            }
+
+            // Сносим rtpmap/fmtp/rtcp-fb для всех PT != opus
+            val allowed = setOf(opusPt!!)
+            for (i in ls.indices) {
+                val l = ls[i]
+                val mm = Regex("""^a=(rtpmap|fmtp|rtcp-fb):(\d+)""").find(l)
+                if (mm != null) {
+                    val pt = mm.groupValues[2]
+                    if (!allowed.contains(pt)) toRemoveIdx.add(i)
+                }
+            }
+            for (i in toRemoveIdx.sortedDescending()) ls.removeAt(i)
+
+            // fmtp для opus
+            val wantFmtp = if (index == 0) {
+                // MIC
+                listOf(
+                    "stereo=0",
+                    "sprop-stereo=0",
+                    "maxaveragebitrate=64000",
+                    "usedtx=1",
+                    "cbr=1",
+                    "useinbandfec=0"
+                ).joinToString(";")
+            } else {
+                // PLAYER
+                listOf(
+                    "stereo=2",
+                    "sprop-stereo=2",
+                    "maxaveragebitrate=128000",
+                    "usedtx=0",
+                    "cbr=1",
+                    "useinbandfec=0"
+                ).joinToString(";")
+            }
+            var fmtpSet = false
+            for (i in ls.indices) {
+                if (ls[i].startsWith("a=fmtp:$opusPt ")) {
+                    ls[i] = "a=fmtp:$opusPt $wantFmtp"
+                    fmtpSet = true
+                    break
+                }
+            }
+            if (!fmtpSet) {
+                var inserted = false
+                for (i in ls.indices) {
+                    if (ls[i].startsWith("a=rtpmap:$opusPt ")) {
+                        ls.add(i + 1, "a=fmtp:$opusPt $wantFmtp")
+                        inserted = true
+                        break
+                    }
+                }
+                if (!inserted) ls.add("a=fmtp:$opusPt $wantFmtp")
+            }
+
+            // ptime / maxptime секционные
+            val wantPtime = if (index == 0) 20 else 40
+            val wantMaxPtime = if (index == 0) 20 else 60
+            fun upsertAttr(name: String, value: Int) {
+                var set = false
+                for (i in ls.indices) {
+                    if (ls[i].startsWith("a=$name:")) {
+                        ls[i] = "a=$name:$value"
+                        set = true
+                        break
+                    }
+                }
+                if (!set) ls.add("a=$name:$value")
+            }
+            upsertAttr("ptime", wantPtime)
+            upsertAttr("maxptime", wantMaxPtime)
+
+            return ls.joinToString("\n", postfix = "\n")
+        }
+
+        val out = StringBuilder()
+        out.append(headers.toString())
+        var audioIdx = 0
+        for (sec in sections) {
+            val body = sec.toString()
+            if (body.startsWith("m=audio ")) {
+                out.append(processAudioSection(body, audioIdx))
+                audioIdx += 1
+            } else {
+                out.append(body)
+            }
+        }
+        return out.toString().replace("\n", "\r\n")
     }
 }
