@@ -135,6 +135,41 @@
   var reofferTimer = null;
   var keepAliveTimer = null;
 
+// --- WebAudio mixer state (MIC + PLAYER) ---
+var mix = { alpha: 0.0, micMuted: false };
+var ac = null, gainMic = null, gainPlayer = null, srcMic = null, srcPlayer = null;
+
+function ensureMixer() {
+  try {
+    // берём AudioContext, который уже поднимается в start()
+    ac = window.__vc_ac || ac;
+    if (!ac && (window.AudioContext || window.webkitAudioContext)) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      ac = new AC();
+      window.__vc_ac = ac;
+    }
+    if (!ac) return false;
+
+    if (!gainMic)   { gainMic   = ac.createGain();   gainMic.gain.value = 1.0; gainMic.connect(ac.destination); }
+    if (!gainPlayer){ gainPlayer= ac.createGain();   gainPlayer.gain.value = 0.0; gainPlayer.connect(ac.destination); }
+
+    updateGains();
+    return true;
+  } catch(e) {
+    log('ensureMixer error:', e && e.message);
+    return false;
+  }
+}
+
+function updateGains() {
+  if (!gainMic || !gainPlayer) return;
+  var a = Math.max(0, Math.min(1, Number(mix.alpha) || 0)); // clamp [0..1]
+  gainPlayer.gain.value = a;
+  gainMic.gain.value = mix.micMuted ? 0 : (1 - a);
+}
+
+
+
   // ---------- Language switches ----------
   (function initLang(){
     if (langRuBtn) langRuBtn.addEventListener('click', function(){ texts.setLang('ru'); setBtn(); setStatus(); });
@@ -386,6 +421,16 @@
         return;
     }
 
+    // Применение микса без UI в браузере
+    if (msg && typeof msg === 'object' && msg.type === 'mix') {
+      if (typeof msg.alpha === 'number') mix.alpha = msg.alpha;
+      if (typeof msg.micMuted === 'boolean') mix.micMuted = msg.micMuted;
+      updateGains();
+      log('Mix apply:', 'alpha=', mix.alpha, 'micMuted=', mix.micMuted);
+      return;
+    }
+
+
       log('Signal: unrecognized payload');
     } catch (e){
       log('Signal handling error:', e);
@@ -472,7 +517,11 @@
         var stream = (ev.streams && ev.streams[0])
           ? ev.streams[0]
           : (ev.track ? new MediaStream([ev.track]) : null);
-        if (stream) {
+
+        if (!stream) return;
+
+        if (!ensureMixer()) {
+          // Fallback на <audio> если AudioContext не поднялся
           audioEl.setAttribute('playsinline', '');
           audioEl.setAttribute('autoplay', '');
           audioEl.muted = false;
@@ -481,14 +530,37 @@
 
           let tries = 0;
           (function kick(){
-            audioEl.play().then(function(){ log('audio.play OK'); }).catch(function(err){
+            audioEl.play().then(function(){ log('audio.play OK (fallback)'); }).catch(function(err){
               tries++;
               log('audio.play FAIL try', tries, err && err.message);
               if (tries < 3) setTimeout(kick, 300);
             });
           })();
+        } else {
+          // Подключаем в WebAudio-микшер (определяем MIC или PLAYER по msid/id)
+          var sid = (stream.id || '');
+          var isPlayer = /player/i.test(sid) || /VC_PLAYER/i.test((ev.track && ev.track.id) || '');
+
+          try {
+            if (isPlayer) {
+              if (srcPlayer) { try { srcPlayer.disconnect(); } catch(_){} }
+              srcPlayer = ac.createMediaStreamSource(stream);
+              srcPlayer.connect(gainPlayer);
+              log('Mixer attach: PLAYER', 'sid=', sid);
+            } else {
+              if (srcMic) { try { srcMic.disconnect(); } catch(_){} }
+              srcMic = ac.createMediaStreamSource(stream);
+              srcMic.connect(gainMic);
+              log('Mixer attach: MIC', 'sid=', sid);
+            }
+            updateGains();
+          } catch (e) {
+            log('mixer attach error:', e && e.message);
+          }
         }
-      } catch (e) {
+
+      }
+      catch (e) {
         log('ontrack error:', e && e.message);
       }
 
