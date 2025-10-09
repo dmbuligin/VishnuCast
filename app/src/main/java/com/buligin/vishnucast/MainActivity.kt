@@ -94,8 +94,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateInputBadge() {
-        val usb = isUsbMicConnected()
-        val iconRes = if (usb) R.drawable.ic_headset_mic_24 else R.drawable.ic_mic_24
+        // Уже есть в классе:
+        // private lateinit var audioManager: AudioManager
+        // fun isUsbMicConnected(): Boolean = ...
+
+        // 1) USB-микрофон как было
+        val hasUsbMic = isUsbMicConnected()
+
+        // 2) Проводная гарнитура с микрофоном (3.5 мм, TRRS):
+        // Входное устройство TYPE_WIRED_HEADSET присутствует только когда есть микрофон.
+        val hasWiredHeadsetMic = try {
+            val inputs = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+            inputs.any { it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET }
+        } catch (_: Throwable) {
+            false
+        }
+
+        val isHeadsetInput = hasUsbMic || hasWiredHeadsetMic
+
+        val iconRes = if (isHeadsetInput) R.drawable.ic_headset_mic_24 else R.drawable.ic_mic_24
         val icon = ContextCompat.getDrawable(this, iconRes)
         val size = dp(32)
         icon?.setBounds(0, 0, size, size)
@@ -104,17 +121,30 @@ class MainActivity : AppCompatActivity() {
         TextViewCompat.setCompoundDrawableTintList(tvStatus, ColorStateList.valueOf(Color.parseColor("#6B7280")))
     }
 
+
     // ===== Permissions =====
     private val requestRecordAudio =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (!granted) {
                 Toast.makeText(this, getString(R.string.permission_denied), Toast.LENGTH_SHORT).show()
                 pendingUnmute = false
-            } else if (pendingUnmute) {
-                setMicEnabled(true)
-                pendingUnmute = false
+                return@registerForActivityResult
             }
+
+            // Разрешение выдано впервые → пересобираем аудиостек без убийства процесса.
+            try {
+                val stop = Intent(this, CastService::class.java).setAction(CastService.ACTION_STOP)
+                if (Build.VERSION.SDK_INT >= 26) startForegroundService(stop) else startService(stop)
+            } catch (_: Throwable) { /* no-op */ }
+
+            // Небольшая задержка, чтобы сервис успел сняться, затем — заново поднять.
+            Handler(Looper.getMainLooper()).postDelayed({
+                CastService.ensureStarted(applicationContext)
+                if (pendingUnmute) setMicEnabled(true)
+                pendingUnmute = false
+            }, 200)
         }
+
 
     private val requestPostNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
