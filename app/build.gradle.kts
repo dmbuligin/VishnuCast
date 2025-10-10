@@ -42,7 +42,7 @@ android {
 
     val versionMajor = 1
     val versionMinor = 7
-    val versionPatch = 2
+    val versionPatch = 3
 
     // versionName = "1.7.0"
     val verName = "$versionMajor.$versionMinor.$versionPatch"
