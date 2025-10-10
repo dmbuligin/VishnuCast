@@ -128,7 +128,7 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
                 val a = (progress / 100f).coerceIn(0f, 1f)
                 MixerState.alpha01.postValue(a)
                 player.setVolume01(a) // временно как громкость плеера
-                // микрофон сейчас идёт в WebRTC как прежде; на B2 α пойдёт в реальный микшер
+                // микрофон сейчас идёт в WebRTC как прежде;
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
