@@ -126,8 +126,10 @@
 
   // --- WebAudio mixer state (MIC + PLAYER) ---
   var mix = { alpha: 0.0, micMuted: false };
-  var ac = null, gainMic = null, gainPlayer = null, srcMic = null, srcPlayer = null, mixOut = null;
-  var currentOutStream = null; // что сейчас выведено в <audio>
+
+ var ac = null, gainMic = null, gainPlayer = null, srcMic = null, srcPlayer = null, mixOut = null;
+ var currentOutStream = null;        // что сейчас выведено в <audio>
+ var micStream = null, playerStream = null; // последние MediaStream для MIC/PLAYER
 
 
 
@@ -497,39 +499,47 @@
           var isPlayer = /player/i.test(sid) || /VC_PLAYER/i.test((ev.track && ev.track.id) || '');
 
           try {
-            if (isPlayer) {
-              if (srcPlayer) { try { srcPlayer.disconnect(); } catch(_){} }
-              srcPlayer = ac.createMediaStreamSource(stream);
-              srcPlayer.connect(gainPlayer);
-              log('Mixer attach: PLAYER', 'sid=', sid);
-            } else {
-              if (srcMic) { try { srcMic.disconnect(); } catch(_){} }
-              srcMic = ac.createMediaStreamSource(stream);
-              srcMic.connect(gainMic);
-              log('Mixer attach: MIC', 'sid=', sid);
-            }
-            updateGains();
+
+           if (isPlayer) {
+             if (srcPlayer) { try { srcPlayer.disconnect(); } catch(_){} }
+             srcPlayer = ac.createMediaStreamSource(stream);
+             srcPlayer.connect(gainPlayer);
+             playerStream = stream; // ← сохранить сам поток
+             log('Mixer attach: PLAYER', 'sid=', sid);
+           } else {
+             if (srcMic) { try { srcMic.disconnect(); } catch(_){} }
+             srcMic = ac.createMediaStreamSource(stream);
+             srcMic.connect(gainMic);
+             micStream = stream; // ← сохранить сам поток
+             log('Mixer attach: MIC', 'sid=', sid);
+           }
+           updateGains();
+
 
             // ── Роутинг звука (дебаунс srcObject):
-            // Предпочитаем DIRECT пока alpha==0 и MIC не mute (поведение V1).
+            // Поведение V1: пока alpha==0 и MIC не mute → всегда DIRECT с MIC.
             // MIX включаем только если (оба источника есть) И (alpha>0 ИЛИ micMuted==true).
-            if (typeof ensureAudioEl === 'function') ensureAudioEl();
-            var bothPresent = !!srcMic && !!srcPlayer;
+            ensureAudioEl();
+            var bothPresent = !!micStream && !!playerStream;
             var a = Number(mix.alpha) || 0;
             var useMix = bothPresent && (mix.micMuted || a > 0);
-            var target = (useMix && typeof mixOut !== 'undefined' && mixOut) ? mixOut.stream : stream;
 
-            // завести currentOutStream глобально рядом с объявлением микшера:
-            //   var currentOutStream = null;
-            if (typeof currentOutStream === 'undefined') { /* если нет — пропустим дебаунс */ }
+            // выбираем целевой поток: MIX → mixOut.stream; иначе предпочитаем MIC
+            var target = useMix && mixOut
+              ? mixOut.stream
+              : (mix.micMuted ? (playerStream || stream) : (micStream || stream));
 
-            if (!currentOutStream || currentOutStream !== target) {
+            // переназначаем srcObject только при реальной смене
+            if (currentOutStream !== target) {
               audioEl.muted = false;
               audioEl.volume = 1.0;
               audioEl.srcObject = target;
               currentOutStream = target;
-              log('Audio route:', useMix ? ('MIX (alpha=' + a.toFixed(2) + ', micMuted=' + !!mix.micMuted + ')')
-                                         : ('DIRECT (alpha=' + a.toFixed(2) + ', micMuted=' + !!mix.micMuted + ')'));
+
+              log('Audio route:', useMix
+                  ? ('MIX (alpha=' + a.toFixed(2) + ', micMuted=' + !!mix.micMuted + ')')
+                  : ('DIRECT (alpha=' + a.toFixed(2) + ', micMuted=' + !!mix.micMuted + ')'));
+
               var tries2 = 0;
               (function kick2(){
                 audioEl.play().then(function(){ log('audio.play OK (route)'); }).catch(function(err){
@@ -541,6 +551,7 @@
             } else {
               log('Audio route: unchanged');
             }
+
 
 
           } catch (e) {
