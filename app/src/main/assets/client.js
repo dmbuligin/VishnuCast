@@ -17,7 +17,9 @@
     } catch(_) {}
     function ts(){
       var d = new Date();
-      return d.toISOString().replace('T',' ').replace('Z','');
+      var z = function(n,l){ n = String(n); while(n.length<l) n='0'+n; return n; };
+      return d.getFullYear() + '-' + z(d.getMonth()+1,2) + '-' + z(d.getDate(),2) + ' ' +
+             z(d.getHours(),2) + ':' + z(d.getMinutes(),2) + ':' + z(d.getSeconds(),2) + '.' + z(d.getMilliseconds(),3);
     }
     function log(){
       if (!on) return;
@@ -46,6 +48,7 @@
       '  border-top-color:#fff;animation:vc-spin .9s linear infinite}',
       '@keyframes vc-spin{to{transform:rotate(360deg)}}',
       '#status.connected{color:#059669}',
+      '#a{display:none}'
     ].join('\n');
     var st = document.createElement('style');
     st.type = 'text/css';
@@ -55,78 +58,64 @@
 
   // ---------- i18n ----------
   var texts = (function(){
-    var isRu = (navigator.language || '').toLowerCase().startsWith('ru');
-    var storeKey = 'vishnucast.lang';
-    var saved = (function(){ try { return localStorage.getItem(storeKey); } catch(_) { return null; }})();
-    var lang = saved || (isRu ? 'ru' : 'en');
-
-    function setLang(l){
-      lang = (l === 'ru') ? 'ru' : 'en';
-      try { localStorage.setItem(storeKey, lang); } catch(_) {}
-      applyTexts();
-      log('Lang set to', lang);
-    }
-
+    var isRu = (navigator.language||'').toLowerCase().startsWith('ru');
+    try {
+      var stored = localStorage.getItem('vishnucast.lang');
+      if (stored === 'en') isRu = false;
+      if (stored === 'ru') isRu = true;
+    } catch(_) {}
     var dict = {
-      en: {
-        connect: 'Connect',
-        connecting: 'Connecting…',
-        disconnect: 'Disconnect',
-        status_idle: 'Idle. Press Connect to start.',
-        status_connecting: 'Connecting…',
-        status_connected: 'Connected',
-        status_error: 'Error',
-        hint_open: 'Open in your browser: ',
-        ws_closed: 'Connection closed.',
-      },
-      ru: {
-        connect: 'Подключиться',
-        connecting: 'Подключение…',
-        disconnect: 'Отключиться',
-        status_idle: 'Ожидание. Нажмите «Подключиться».',
-        status_connecting: 'Подключение…',
-        status_connected: 'Подключено',
-        status_error: 'Ошибка',
-        hint_open: 'Откройте в браузере: ',
-        ws_closed: 'Соединение закрыто.',
-      }
+      ru: { btn_connect:'Подключить', btn_disconnect:'Отключить',
+            status_idle:'Готов', status_connecting:'Подключение…', status_connected:'Подключено', status_error:'Ошибка',
+            lang_ru:'RU', lang_en:'EN' },
+      en: { btn_connect:'Connect', btn_disconnect:'Disconnect',
+            status_idle:'Ready', status_connecting:'Connecting…', status_connected:'Connected', status_error:'Error',
+            lang_ru:'RU', lang_en:'EN' }
     };
-
-    function t(key){ return (dict[lang] && dict[lang][key]) || key; }
-
-    function applyTexts(){
+    function t(key){ return (isRu?dict.ru:dict.en)[key] || key; }
+    function setLang(l){
+      if (l==='ru') isRu=true; else if (l==='en') isRu=false;
+      try { localStorage.setItem('vishnucast.lang', isRu?'ru':'en'); } catch(_) {}
+      apply();
+    }
+    function apply(){
       var btn = document.getElementById('btn');
       var status = document.getElementById('status');
-      var hint = document.getElementById('hint');
-
-      if (btn) btn.textContent = (state === 'connected') ? t('disconnect') : (state === 'connecting' ? t('connecting') : t('connect'));
-      if (status) {
-        status.textContent = (state === 'connected') ? t('status_connected')
-          : (state === 'connecting' ? t('status_connecting') : t('status_idle'));
-        status.classList.toggle('connected', state === 'connected');
-      }
-      if (hint) {
-        try {
-          var origin = location.protocol + '//' + location.host;
-          hint.innerHTML = '<span>' + t('hint_open') + '</span><a href="' + origin + '">' + origin + '</a>';
-        } catch (_) {
-          hint.textContent = t('hint_open');
-        }
-      }
+      var ru = document.getElementById('lang-ru');
+      var en = document.getElementById('lang-en');
+      if (btn) btn.textContent = (state==='connected' ? t('btn_disconnect') : t('btn_connect'));
+      if (status) status.textContent = t('status_idle');
+      if (ru) ru.textContent = t('lang_ru');
+      if (en) en.textContent = t('lang_en');
     }
-
-    return { t:t, setLang:setLang, apply:applyTexts, get lang(){ return lang; } };
+    return { t:t, setLang:setLang, apply:apply };
   })();
 
-  // ---------- elements ----------
+  // ---------- DOM ----------
   var btn = document.getElementById('btn');
   var statusEl = document.getElementById('status');
-  var hintEl = document.getElementById('hint');
-  var audioEl = document.getElementById('audio');
-  var langRuBtn = document.getElementById('langRuBtn');
-  var langEnBtn = document.getElementById('langEnBtn');
+  var audioEl = document.getElementById('a');
+  var langRuBtn = document.getElementById('lang-ru');
+  var langEnBtn = document.getElementById('lang-en');
 
-  // ---------- state ----------
+  // гарантированно иметь <audio id="a">
+  function ensureAudioEl(){
+    if (audioEl && audioEl.nodeName === 'AUDIO') return audioEl;
+    var el = document.getElementById('a');
+    if (!el || el.nodeName !== 'AUDIO') {
+      el = document.createElement('audio');
+      el.id = 'a';
+      el.setAttribute('playsinline', '');
+      el.setAttribute('autoplay', '');
+      el.style.display = 'none';
+      document.body.appendChild(el);
+      log('Created hidden <audio id="a">');
+    }
+    audioEl = el;
+    return audioEl;
+  }
+
+  // ---------- State ----------
   var pc = null;
   var ws = null;
   var userStopped = false;
@@ -135,70 +124,56 @@
   var reofferTimer = null;
   var keepAliveTimer = null;
 
-// --- WebAudio mixer state (MIC + PLAYER) ---
-var mix = { alpha: 0.0, micMuted: false };
-var ac = null, gainMic = null, gainPlayer = null, srcMic = null, srcPlayer = null, mixOut = null;
+  // --- WebAudio mixer state (MIC + PLAYER) ---
+  var mix = { alpha: 0.0, micMuted: false };
+  var ac = null, gainMic = null, gainPlayer = null, srcMic = null, srcPlayer = null, mixOut = null;
+  var currentOutStream = null; // что сейчас выведено в <audio>
 
 
-function ensureMixer() {
-  try {
-    // берём AudioContext, который уже поднимается в start()
-    ac = window.__vc_ac || ac;
-    if (!ac && (window.AudioContext || window.webkitAudioContext)) {
-      var AC = window.AudioContext || window.webkitAudioContext;
-      ac = new AC();
-      window.__vc_ac = ac;
+
+  var currentOutStream = null; // ← что сейчас выведено в <audio>
+
+
+  function ensureMixer() {
+    try {
+      ensureAudioEl(); // до любых setAttribute/play
+
+      ac = window.__vc_ac || ac;
+      if (!ac && (window.AudioContext || window.webkitAudioContext)) {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        ac = new AC();
+        window.__vc_ac = ac;
+      }
+      if (!ac) return false;
+
+      // важный жест: на Android/мобилках иногда стартует "suspended"
+      try { if (ac.state === 'suspended') ac.resume(); } catch(_){}
+
+      // Создаём гейны
+      if (!gainMic)    { gainMic    = ac.createGain();   gainMic.gain.value = 1.0; }
+      if (!gainPlayer) { gainPlayer = ac.createGain();   gainPlayer.gain.value = 0.0; }
+
+      // Миксуем в MediaStreamDestination, srcObject назначим в ontrack при необходимости
+      if (!mixOut) {
+        mixOut = ac.createMediaStreamDestination();
+        try { gainMic.connect(mixOut); } catch(_) {}
+        try { gainPlayer.connect(mixOut); } catch(_) {}
+      }
+
+      updateGains();
+      return true;
+    } catch(e) {
+      log('ensureMixer error:', e && e.message);
+      return false;
     }
-    if (!ac) return false;
-
-// Создаём гейны, но пока никуда не коннектим
-if (!gainMic)    { gainMic    = ac.createGain();   gainMic.gain.value = 1.0; }
-if (!gainPlayer) { gainPlayer = ac.createGain();   gainPlayer.gain.value = 0.0; }
-
-// Миксуем в MediaStreamDestination и подаём в <audio>
-if (!mixOut) {
-  mixOut = ac.createMediaStreamDestination();
-  // Коннектим гейны в выход
-  try { gainMic.connect(mixOut); } catch(_) {}
-  try { gainPlayer.connect(mixOut); } catch(_) {}
-
-  // Готовим <audio> к воспроизведению микса
-  if (audioEl) {
-    audioEl.setAttribute('playsinline', '');
-    audioEl.setAttribute('autoplay', '');
-    audioEl.muted = false;
-    audioEl.volume = 1.0;
-    try { audioEl.srcObject = mixOut.stream; } catch(e) { log('audio mixOut.srcObject error:', e && e.message); }
-
-    // Надёжный kick для autoplay
-    var tries = 0;
-    (function kick(){
-      audioEl.play().then(function(){ log('audio.play OK (mixOut)'); }).catch(function(err){
-        tries++;
-        log('audio.play FAIL (mixOut) try', tries, err && err.message);
-        if (tries < 5) setTimeout(kick, 300);
-      });
-    })();
   }
-}
 
-
-    updateGains();
-    return true;
-  } catch(e) {
-    log('ensureMixer error:', e && e.message);
-    return false;
+  function updateGains() {
+    if (!gainMic || !gainPlayer) return;
+    var a = Math.max(0, Math.min(1, Number(mix.alpha) || 0)); // clamp [0..1]
+    gainPlayer.gain.value = a;
+    gainMic.gain.value = mix.micMuted ? 0 : (1 - a);
   }
-}
-
-function updateGains() {
-  if (!gainMic || !gainPlayer) return;
-  var a = Math.max(0, Math.min(1, Number(mix.alpha) || 0)); // clamp [0..1]
-  gainPlayer.gain.value = a;
-  gainMic.gain.value = mix.micMuted ? 0 : (1 - a);
-}
-
-
 
   // ---------- Language switches ----------
   (function initLang(){
@@ -228,55 +203,50 @@ function updateGains() {
           : (state === 'connecting') ? texts.t('status_connecting') : texts.t('status_idle');
     }
     statusEl.textContent = txt;
-    statusEl.classList.toggle('connected', state === 'connected');
-    log('Status:', txt, '| state=', state);
+    statusEl.className = (state === 'connected') ? 'connected' : '';
   }
 
   function setBtn() {
     if (!btn) return;
     btn.disabled = (state === 'connecting');
-    while (btn.firstChild) btn.removeChild(btn.firstChild);
-    if (state === 'connecting') {
-      var sp = document.createElement('span'); sp.className = 'spin';
-      btn.appendChild(sp);
-      btn.appendChild(document.createTextNode(texts.t('connecting')));
-    } else {
-      btn.appendChild(document.createTextNode(state === 'connected' ? texts.t('disconnect') : texts.t('connect')));
-    }
-    if (state === 'connected') {
-      btn.style.backgroundColor = 'var(--vc-btn-on)';
-      btn.style.boxShadow = '0 1px 0 rgba(0,0,0,.05),0 6px 12px rgba(22,163,74,.25)';
-    } else {
-      btn.style.backgroundColor = 'var(--vc-btn)';
-      btn.style.boxShadow = '0 1px 0 rgba(0,0,0,.05),0 6px 12px rgba(37,99,235,.25)';
-    }
-    log('Button updated | state=', state);
+    btn.textContent = (state === 'connected' ? texts.t('btn_disconnect') : texts.t('btn_connect'));
+    btn.style.backgroundColor = (state === 'connected' ? 'var(--vc-btn-on)' : 'var(--vc-btn)');
   }
 
-  function wsPathFromQuery() {
-    var q = location.search || '';
-    if (!q) return '/ws';
-    try {
-      var params = new URLSearchParams(q);
-      var p = params.get('wspath');
-      if (p && p[0] !== '/') p = '/' + p;
-      return p || '/ws';
-    } catch (_){ return '/ws'; }
+  function resetBuffers(){
+    try { ensureAudioEl(); audioEl.pause(); audioEl.removeAttribute('src'); audioEl.srcObject = null; } catch(e){ log('audio src reset error:', e && e.message); }
+    try { if (srcMic) { srcMic.disconnect(); srcMic = null; } } catch(_) {}
+    try { if (srcPlayer) { srcPlayer.disconnect(); srcPlayer = null; } } catch(_) {}
   }
 
-  function makeWsUrl() {
-    var proto = (location.protocol === 'https:') ? 'wss://' : 'ws://';
-    var url = proto + location.host + wsPathFromQuery();
-    log('WS URL:', url);
-    return url;
-  }
+  function stopAll(byUser){
+    if (stopping) return;
+    stopping = true;
+    userStopped = !!byUser;
 
-  function safeClosePc() {
-    try { if (pc) pc.ontrack = null; } catch(_){}
+    log('Stopping…');
+    if (reofferTimer) { try { clearTimeout(reofferTimer); } catch(_){} reofferTimer = null; }
+
+    try { if (mixOut) { /* keep created */ } } catch(_){}
+    try { if (gainMic) gainMic.gain.value = 1.0; } catch(_){}
+    try { if (gainPlayer) gainPlayer.gain.value = 0.0; } catch(_){}
+
+    try { if (pc && pc.ontrack) pc.ontrack = null; } catch(_){}
     try { if (pc) pc.onicecandidate = null; } catch(_){}
     try { if (pc && pc.signalingState !== 'closed') pc.close(); } catch(_){}
     if (pc) log('PC closed');
     pc = null;
+
+    safeCloseWs();
+
+    try { ensureAudioEl(); audioEl.pause(); audioEl.removeAttribute('src'); audioEl.srcObject = null; } catch(e){ log('audio srcObject clear error:', e); }
+    resetBuffers();
+
+    state = 'idle';
+    setBtn();
+    setStatus(texts.t('ws_closed'));
+
+    stopping = false;
   }
 
   function safeCloseWs() {
@@ -287,96 +257,6 @@ function updateGains() {
       }
     } catch(_){}
     ws = null;
-  }
-
-  function resetBuffers(){}
-  function cancelReofferTimer(){ if (reofferTimer) { clearTimeout(reofferTimer); reofferTimer = null; log('Re-offer timer canceled'); } }
-
-  // ---------- Start / Stop ----------
-  function start() {
-    if (state === 'connecting' || state === 'connected') return;
-
-    // Разблокируем аудио-д движок в рамках жеста пользователя
-    try {
-      if (window.AudioContext || window.webkitAudioContext) {
-        var AC = window.AudioContext || window.webkitAudioContext;
-        if (!window.__vc_ac) window.__vc_ac = new AC();
-        if (window.__vc_ac.state === 'suspended') { window.__vc_ac.resume().catch(()=>{}); }
-        log('AudioContext state:', window.__vc_ac.state);
-      }
-    } catch(e) { log('AudioContext error:', e); }
-
-    userStopped = false;
-    stopping = false;
-    state = 'connecting';
-    setBtn();
-    setStatus();
-
-    var url = makeWsUrl();
-    try {
-      ws = new WebSocket(url);
-      log('WS created');
-    } catch (e) {
-      log('WS create error:', e);
-      setStatus(texts.t('status_error'));
-      return;
-    }
-
-    ws.onopen = function(){
-      log('WS open');
-      if (userStopped) { log('WS open but user already stopped — closing'); safeCloseWs(); return; }
-        // ⬇️ keep-alive каждые 15s
-        try { if (keepAliveTimer) clearInterval(keepAliveTimer); } catch(_) {}
-        keepAliveTimer = setInterval(function(){
-          try {
-            if (ws && ws.readyState === 1) {
-              ws.send(JSON.stringify({ type: 'ping', t: Date.now() }));
-              log('WS keep-alive → ping');
-            }
-          } catch(e){ log('WS keep-alive error:', e && e.message); }
-        }, 15000);
-      beginWebRtc();
-    };
-
-    ws.onclose = function(ev){
-      log('WS close code=', ev.code, 'reason=', ev.reason);
-      try { if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; } } catch(_) {}
-      if (!userStopped) setStatus(texts.t('ws_closed'));
-      stopAll(false);
-    };
-
-    ws.onerror = function(err){
-      log('WS error:', err);
-      setStatus(texts.t('status_error'));
-    };
-
-    ws.onmessage = function(ev){
-      log('WS message len=', (''+ev.data).length);
-      handleSignal(ev.data);
-    };
-  }
-
-  function stopAll(manual){
-
-    try { if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; } } catch(_){}
-    if (manual == null) manual = false;
-    if (stopping) return;
-    stopping = true;
-
-    userStopped = manual;
-    log('StopAll called. manual=', manual, 'state=', state);
-
-    cancelReofferTimer();
-    safeCloseWs();
-    safeClosePc();
-    try { audioEl.srcObject = null; } catch(e) { log('audio srcObject clear error:', e); }
-    resetBuffers();
-
-    state = 'idle';
-    setBtn();
-    setStatus(texts.t('ws_closed'));
-
-    stopping = false;
   }
 
   // ---------- Signaling ----------
@@ -392,7 +272,7 @@ function updateGains() {
       }
 
       if (isLikelySdpString(msg)) {
-        var desc = { type: (msg.indexOf('\na=fingerprint:') >= 0 ? (pc && pc.localDescription && pc.localDescription.type === 'offer' ? 'answer' : 'offer') : 'answer'), sdp: msg };
+        var desc = { type: (msg.indexOf('\na=fingerprint:') >= 0 && msg.indexOf('\nm=video') < 0 ? (pc && pc.signalingState === 'have-local-offer' ? 'answer' : 'offer') : 'answer'), sdp: msg };
         log('Signal: SDP string →', desc.type, 'len=', desc.sdp.length);
         onRemoteSdp(desc);
         return;
@@ -415,8 +295,7 @@ function updateGains() {
         if (msg.candidate || msg.candidates) {
           var arr = [];
           if (msg.candidates && Array.isArray(msg.candidates)) arr = msg.candidates;
-          else arr = [msg];
-
+          else if (msg.candidate) arr = [ msg ];
           log('Signal: ICE candidates count=', arr.length);
           arr.forEach(function(c){
             var cand = c.candidate || c;
@@ -438,28 +317,27 @@ function updateGains() {
         if (msg.cmd === 'bye' || msg.bye) { log('Signal: bye'); stopAll(false); return; }
         if (msg.needOffer || msg.cmd === 'need-offer') { log('Signal: need-offer'); sendOffer(); return; }
       }
-    // keep-alive ответ сервера
-    if (msg && typeof msg === 'object' && msg.type === 'pong') {
-      var rtt = (typeof msg.t === 'number') ? (Date.now() - msg.t) : null;
-      if (rtt != null && rtt < 0) rtt = Math.abs(rtt); // на всякий случай
-      log('WS keep-alive ← pong', (rtt != null ? ('RTT≈' + rtt + 'ms') : ''), (msg.ts ? ('srvTs=' + msg.ts) : ''));
-      return;
-    }
-    // Простой ACK от сервера за оффер — игнорируем
-    if (msg && typeof msg === 'object' && msg.type === 'ack') {
-    log('WS ack:', msg.stage || '');
+      // keep-alive ответ сервера
+      if (msg && typeof msg === 'object' && msg.type === 'pong') {
+        var rtt = (typeof msg.t === 'number') ? (Date.now() - msg.t) : null;
+        if (rtt != null && rtt < 0) rtt = Math.abs(rtt);
+        log('WS keep-alive ← pong', (rtt != null ? ('RTT≈' + rtt + 'ms') : ''), (msg.ts ? ('srvTs=' + msg.ts) : ''));
         return;
-    }
+      }
+      // Простой ACK от сервера за оффер — игнорируем
+      if (msg && typeof msg === 'object' && msg.type === 'ack') {
+        log('WS ack:', msg.stage || '');
+        return;
+      }
 
-    // Применение микса без UI в браузере
-    if (msg && typeof msg === 'object' && msg.type === 'mix') {
-      if (typeof msg.alpha === 'number') mix.alpha = msg.alpha;
-      if (typeof msg.micMuted === 'boolean') mix.micMuted = msg.micMuted;
-      updateGains();
-      log('Mix apply:', 'alpha=', mix.alpha, 'micMuted=', mix.micMuted);
-      return;
-    }
-
+      // Применение микса без UI в браузере
+      if (msg && typeof msg === 'object' && msg.type === 'mix') {
+        if (typeof msg.alpha === 'number') mix.alpha = msg.alpha;
+        if (typeof msg.micMuted === 'boolean') mix.micMuted = msg.micMuted;
+        updateGains();
+        log('Mix apply:', 'alpha=', mix.alpha, 'micMuted=', mix.micMuted);
+        return;
+      }
 
       log('Signal: unrecognized payload');
     } catch (e){
@@ -471,9 +349,10 @@ function updateGains() {
     if (!pc) { log('onRemoteSdp: no pc'); return; }
     log('PC setRemoteDescription:', desc.type);
     pc.setRemoteDescription(new RTCSessionDescription(desc)).then(function(){
+      log('PC remoteDescription set');
       if (desc.type === 'offer') {
         log('PC createAnswer');
-        pc.createAnswer().then(function(ans){
+        return pc.createAnswer().then(function(ans){
           log('PC setLocalDescription(answer)');
           return pc.setLocalDescription(ans);
         }).then(function(){
@@ -489,6 +368,50 @@ function updateGains() {
   }
 
   // ---------- WebRTC ----------
+  function start(){
+    if (state !== 'idle') { log('start: wrong state', state); return; }
+    state = 'connecting';
+    setBtn();
+    setStatus();
+
+    userStopped = false;
+    ensureAudioEl(); // создадим <audio>, если его нет
+    resetBuffers();
+
+    // connect WS
+    var proto = (location.protocol === 'https:' ? 'wss' : 'ws');
+    var wsUrl = proto + '://' + location.host + '/ws';
+    ws = new WebSocket(wsUrl);
+    ws.onerror = function(ev){ log('WS error', ev); };
+    ws.onclose = function(ev){ log('WS close', ev && ev.code, ev && ev.reason); stopAll(false); };
+    ws.onmessage = function(ev){
+      var data = ev && ev.data;
+      log('WS message len=', (typeof data === 'string' ? data.length : (data && data.byteLength) || 0));
+      handleSignal(data);
+    };
+
+    ws.onopen = function(){
+      log('WS open');
+      if (userStopped) { log('WS open but user already stopped — closing'); safeCloseWs(); return; }
+      // ⬇️ keep-alive каждые 15s
+      try { if (keepAliveTimer) clearInterval(keepAliveTimer); } catch(_) {}
+      keepAliveTimer = setInterval(function(){
+        try {
+          if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'ping', t: Date.now() }));
+            log('WS keep-alive → ping');
+          }
+        } catch(e){ log('keep-alive send error:', e && e.message); }
+      }, 15000);
+
+      beginWebRtc();
+    };
+  }
+
+  function stop(){
+    stopAll(true);
+  }
+
   function beginWebRtc(){
     if (!ws || ws.readyState !== 1) { log('beginWebRtc: WS not ready'); return; }
 
@@ -496,7 +419,7 @@ function updateGains() {
     pc = new RTCPeerConnection(conf);
     log('PC created');
 
-    // Ранний запуск микшера → <audio> уже готов, когда прилетят треки
+    // Ранний запуск микшера → <audio> и AC готовы до прихода треков
     ensureMixer();
 
     try {
@@ -531,7 +454,7 @@ function updateGains() {
       }
     };
     pc.onsignalingstatechange = function(){
-      log('Signaling state:', pc.signalingState);
+      log('PC signaling state:', pc.signalingState);
     };
     pc.onconnectionstatechange = function(){
       log('PC conn state:', pc.connectionState);
@@ -555,8 +478,7 @@ function updateGains() {
 
         if (!ensureMixer()) {
           // Fallback на <audio> если AudioContext не поднялся
-          audioEl.setAttribute('playsinline', '');
-          audioEl.setAttribute('autoplay', '');
+          ensureAudioEl();
           audioEl.muted = false;
           audioEl.volume = 1.0;
           audioEl.srcObject = stream;
@@ -565,12 +487,12 @@ function updateGains() {
           (function kick(){
             audioEl.play().then(function(){ log('audio.play OK (fallback)'); }).catch(function(err){
               tries++;
-              log('audio.play FAIL try', tries, err && err.message);
+              log('audio.play FAIL (fallback) try', tries, err && err.message);
               if (tries < 3) setTimeout(kick, 300);
             });
           })();
         } else {
-          // Подключаем в WebAudio-микшер (определяем MIC или PLAYER по msid/id)
+          // Подключаем в WebAudio-микшер (MIC/PLAYER по msid/id)
           var sid = (stream.id || '');
           var isPlayer = /player/i.test(sid) || /VC_PLAYER/i.test((ev.track && ev.track.id) || '');
 
@@ -587,6 +509,40 @@ function updateGains() {
               log('Mixer attach: MIC', 'sid=', sid);
             }
             updateGains();
+
+            // ── Роутинг звука (дебаунс srcObject):
+            // Предпочитаем DIRECT пока alpha==0 и MIC не mute (поведение V1).
+            // MIX включаем только если (оба источника есть) И (alpha>0 ИЛИ micMuted==true).
+            if (typeof ensureAudioEl === 'function') ensureAudioEl();
+            var bothPresent = !!srcMic && !!srcPlayer;
+            var a = Number(mix.alpha) || 0;
+            var useMix = bothPresent && (mix.micMuted || a > 0);
+            var target = (useMix && typeof mixOut !== 'undefined' && mixOut) ? mixOut.stream : stream;
+
+            // завести currentOutStream глобально рядом с объявлением микшера:
+            //   var currentOutStream = null;
+            if (typeof currentOutStream === 'undefined') { /* если нет — пропустим дебаунс */ }
+
+            if (!currentOutStream || currentOutStream !== target) {
+              audioEl.muted = false;
+              audioEl.volume = 1.0;
+              audioEl.srcObject = target;
+              currentOutStream = target;
+              log('Audio route:', useMix ? ('MIX (alpha=' + a.toFixed(2) + ', micMuted=' + !!mix.micMuted + ')')
+                                         : ('DIRECT (alpha=' + a.toFixed(2) + ', micMuted=' + !!mix.micMuted + ')'));
+              var tries2 = 0;
+              (function kick2(){
+                audioEl.play().then(function(){ log('audio.play OK (route)'); }).catch(function(err){
+                  tries2++;
+                  log('audio.play FAIL (route) try', tries2, err && err.message);
+                  if (tries2 < 5) setTimeout(kick2, 300);
+                });
+              })();
+            } else {
+              log('Audio route: unchanged');
+            }
+
+
           } catch (e) {
             log('mixer attach error:', e && e.message);
           }
@@ -623,12 +579,16 @@ function updateGains() {
       if (!ws || ws.readyState !== 1) { log('sendOffer: WS not ready'); return; }
       var payload = { type: pc.localDescription.type, sdp: pc.localDescription.sdp };
       log('WS send offer type=', payload.type, 'len=', (payload.sdp||'').length);
-      ws.send(JSON.stringify(payload));
+      try {
+        ws.send(JSON.stringify(payload));
+      } catch(e){ log('WS send offer error:', e && e.message); }
     }).catch(function(e){
       log('Offer path error:', e && e.message);
-      setStatus(texts.t('status_error'));
-      stopAll(false);
     });
+  }
+
+  function cancelReofferTimer(){
+    if (reofferTimer) { try { clearTimeout(reofferTimer); } catch(_){} reofferTimer = null; }
   }
 
   function sendAnswer(){
@@ -640,8 +600,10 @@ function updateGains() {
   }
 
   // ---------- init ----------
+  texts.apply();
   setBtn();
   setStatus();
+  ensureAudioEl(); // на всякий случай создать заранее
 
   log('Client boot. Log ON =', LOG.on);
 })();
