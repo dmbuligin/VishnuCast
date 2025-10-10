@@ -127,18 +127,18 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                 val a = (progress / 100f).coerceIn(0f, 1f)
                 MixerState.alpha01.postValue(a)
-                player.setVolume01(a) // временно как громкость плеера
+           //     player.setVolume01(a) // временно как громкость плеера
                 // микрофон сейчас идёт в WebRTC как прежде;
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
 
-        // Подпишем α на случай внешних изменений (например, mute логика)
-        MixerState.alpha01.observe(activity, Observer { a ->
-            cross?.progress = (a * 100).toInt()
-            player.setVolume01(a)
-        })
+     //   // Подпишем α на случай внешних изменений (например, mute логика)
+     //   MixerState.alpha01.observe(activity, Observer { a ->
+     //       cross?.progress = (a * 100).toInt()
+     //       player.setVolume01(a)
+     //   })
 
         // Наблюдатели плеера
         player.title.observe(activity, Observer { title ->
