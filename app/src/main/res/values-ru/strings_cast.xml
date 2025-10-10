@@ -111,6 +111,21 @@
     <string name="cancel">Отмена</string>
     <string name="update_enable_unknown_sources">Разрешите установку из этого источника</string>
 
+<!--    Pleer-->
+
+    <string name="cast_playlist_title">Плейлист</string>
+    <string name="cast_add">Добавить</string>
+    <string name="cast_remove">Удалить</string>
+    <string name="cast_clear">Очистить</string>
+    <string name="cast_unknown_track">Неизвестный трек</string>
+
+    <string name="cast_player_title">Плеер</string>
+    <string name="cast_prev">Предыдущий</string>
+    <string name="cast_next">Следующий</string>
+    <string name="cast_play_pause">Воспроизведение/Пауза</string>
+
+    <string name="cast_removed">Удалено</string>
+
 
 
 </resources>

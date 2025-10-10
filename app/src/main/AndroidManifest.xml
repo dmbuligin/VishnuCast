@@ -87,7 +87,10 @@
         </provider>
 
 
-
+        <activity
+            android:name=".ui.PlaylistActivity"
+            android:exported="false"
+            android:label="@string/cast_playlist_title" />
 
 
 

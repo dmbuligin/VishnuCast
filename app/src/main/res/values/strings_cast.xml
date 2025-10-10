@@ -114,6 +114,23 @@
     <string name="cancel">Cancel</string>
     <string name="update_enable_unknown_sources">Allow installation from this source</string>
 
+<!--Pleer-->
+    <string name="cast_playlist_title">Playlist</string>
+    <string name="cast_add">Add</string>
+    <string name="cast_remove">Remove</string>
+    <string name="cast_clear">Clear</string>
+    <string name="cast_unknown_track">Unknown track</string>
+
+    <string name="cast_player_title">Player</string>
+    <string name="cast_prev">Previous</string>
+    <string name="cast_next">Next</string>
+    <string name="cast_play_pause">Play/Pause</string>
+
+    <string name="cast_removed">Removed</string>
+
+
+
+
 
 
 

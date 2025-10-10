@@ -51,6 +51,10 @@ import android.widget.Button
 import android.widget.ImageButton
 import android.view.MotionEvent
 import android.view.ViewConfiguration
+import com.buligin.vishnucast.ui.PlaylistActivity
+
+
+
 
 // === ДОБАВЛЕНО: для управляемого обновления ===
 import com.buligin.vishnucast.update.UpdateManager
@@ -75,6 +79,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnToggle: Button
     private lateinit var levelBar: ProgressBar
     private lateinit var sliderContainer: FrameLayout
+
+    private var playerUiBinder: com.buligin.vishnucast.ui.PlayerUiBinder? = null
 
     private var fgArrow: Drawable? = null
     private val isRunning = AtomicBoolean(false)
@@ -208,6 +214,10 @@ class MainActivity : AppCompatActivity() {
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
         updateInputBadge()
 
+
+        playerUiBinder = com.buligin.vishnucast.ui.PlayerUiBinder(this).attach()
+
+
         // Долгий тап — (un)mute
         btnToggle.setOnLongClickListener {
             try { it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS) } catch (_: Throwable) {}
@@ -316,6 +326,12 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, Handler(Looper.getMainLooper()))
         syncUiFromService()
+
+        if (playerUiBinder == null) {
+            playerUiBinder = com.buligin.vishnucast.ui.PlayerUiBinder(this).attach()
+        }
+
+
     }
 
     override fun onStop() {
@@ -323,6 +339,7 @@ class MainActivity : AppCompatActivity() {
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         arrowHint.stopHint()
         hideArrowHint()
+
     }
 
     // ===== Menu =====
@@ -340,6 +357,18 @@ class MainActivity : AppCompatActivity() {
         R.id.action_check_updates -> { checkForUpdates(); true }
         R.id.action_about -> { startActivity(Intent(this, AboutActivity::class.java)); true }
         R.id.action_refresh -> { refreshNetworkUi(); true }
+
+        R.id.action_open_playlist -> {
+            openPlaylist.launch(android.content.Intent(this, com.buligin.vishnucast.ui.PlaylistActivity::class.java))
+
+
+
+            true
+        }
+
+
+
+
         else -> super.onOptionsItemSelected(item)
     }
 
@@ -641,4 +670,22 @@ class MainActivity : AppCompatActivity() {
         // 3) Поехали качать
         UpdateManager.startDownload(this, url, fileName)
     }
+
+
+
+    private val openPlaylist = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        val idx = res.data?.getIntExtra("startIndex", -1) ?: -1
+        playerUiBinder?.reloadPlaylistAndPlay(
+            if (res.resultCode == android.app.Activity.RESULT_OK && idx >= 0) idx else null
+        )
+    }
+
+
+
+
+
+
+
 }
