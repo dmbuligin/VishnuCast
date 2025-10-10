@@ -305,7 +305,7 @@ class SignalingSocket(
                     "stereo=0",
                     "sprop-stereo=0",
                     "maxaveragebitrate=64000",
-                    "usedtx=1",
+                    "usedtx=0",
                     "cbr=1",
                     "useinbandfec=0"
                 ).joinToString(";")
@@ -341,8 +341,9 @@ class SignalingSocket(
             }
 
             // ptime / maxptime секционные
-            val wantPtime = if (index == 0) 20 else 40
+            val wantPtime = if (index == 0) 10 else 40
             val wantMaxPtime = if (index == 0) 20 else 60
+
             fun upsertAttr(name: String, value: Int) {
                 var set = false
                 for (i in ls.indices) {
