@@ -13,6 +13,7 @@ import androidx.lifecycle.Observer
 import com.buligin.vishnucast.R
 import com.buligin.vishnucast.audio.PlayerCore
 import com.buligin.vishnucast.audio.PlaylistStore
+import com.buligin.vishnucast.audio.MixerState
 
 /**
  * Ненавязчиво встраивает PlayerCore в существующий экран.
@@ -32,6 +33,9 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
     private var tvNow: TextView? = null
     private var tvDur: TextView? = null
     private var tvTitle: TextView? = null
+
+    // MIXER: crossfader
+    private var cross: SeekBar? = null
 
     private val uiHandler = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
@@ -81,6 +85,7 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         seek = root.findViewById(R.id.playerSeek)
         tvNow = root.findViewById(R.id.playerNow)
         tvDur = root.findViewById(R.id.playerDur)
+        cross = root.findViewById(R.id.mixCrossfader) // MIXER
 
         // Если панель отсутствует — выходим тихо, не мешаем экрану
         if (btnPlayPause == null || seek == null) return this
@@ -91,7 +96,8 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         btnPrev?.setOnClickListener {
             if (playlistStore.load().isNotEmpty()) {
                 player.previous()
-                player.play()
+                // оставляем на паузе — единообразно с тапом по элементу
+                player.pause(); player.seekTo(0L)
             }
         }
         btnNext?.setOnClickListener {
@@ -111,14 +117,30 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         }
 
         seek?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) player.seekTo(p.toLong()) }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+
+        // MIXER: кросс-фейдер — публикуем α и регулируем громкость плеера прямо сейчас (B1)
+        cross?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) player.seekTo(progress.toLong())
+                val a = (progress / 100f).coerceIn(0f, 1f)
+                MixerState.alpha01.postValue(a)
+                player.setVolume01(a) // временно как громкость плеера
+                // микрофон сейчас идёт в WebRTC как прежде; на B2 α пойдёт в реальный микшер
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
 
-        // Наблюдатели
+        // Подпишем α на случай внешних изменений (например, mute логика)
+        MixerState.alpha01.observe(activity, Observer { a ->
+            cross?.progress = (a * 100).toInt()
+            player.setVolume01(a)
+        })
+
+        // Наблюдатели плеера
         player.title.observe(activity, Observer { title ->
             tvTitle?.text = if (title.isNullOrBlank()) activity.getString(R.string.cast_player_title) else title
         })
