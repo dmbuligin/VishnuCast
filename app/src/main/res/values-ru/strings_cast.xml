@@ -24,7 +24,7 @@
 
 
     <!-- Hints -->
-    <string name="hint_open_url">Откройте %1$s</string>
+    <string name="hint_open_url">%1$s</string>
     <string name="placeholder_url">http://&lt;IP&gt;:8080</string>
     <string name="ip_fmt">IP: %1$s</string>
     <string name="ip_unknown">неизвестно</string>
