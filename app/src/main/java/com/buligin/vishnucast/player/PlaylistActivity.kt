@@ -1,4 +1,4 @@
-package com.buligin.vishnucast.ui
+package com.buligin.vishnucast.player
 
 import android.content.Intent
 import android.net.Uri
@@ -11,8 +11,8 @@ import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.buligin.vishnucast.R
-import com.buligin.vishnucast.audio.PlaylistItem
-import com.buligin.vishnucast.audio.PlaylistStore
+import com.buligin.vishnucast.player.PlaylistItem
+import com.buligin.vishnucast.player.PlaylistStore
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
 import java.util.Collections

@@ -9,7 +9,10 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 
+
 class CastService : Service() {
+
+    private var _mixerObserver: androidx.lifecycle.Observer<Float>? = null
 
     private var server: VishnuServer? = null
     private var isFgShown: Boolean = false // флаг: уведомление реально запущено через startForeground
@@ -26,6 +29,23 @@ class CastService : Service() {
 
         // Mute по умолчанию
         applyMute(true)
+
+        // === MIX bridge: наблюдаем alpha и шлём в браузер ===
+        val mixObserver = androidx.lifecycle.Observer<Float> { a ->
+            // micMuted берём из prefs, чтобы не лезть в приватные поля
+            val muted = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MUTED, true)
+
+            try {
+                android.util.Log.d("VishnuMix", "CastService.observe alpha=" + (a ?: 0f).toString() + " micMuted=" + muted)
+                SignalingSocket.broadcastMix(a ?: 0f, muted)
+                android.util.Log.d("VishnuMix", "CastService.broadcastMix sent")
+            } catch (_: Throwable) { }
+        }
+        // сохраним, чтобы снять подписку в onDestroy
+        _mixerObserver = mixObserver
+        com.buligin.vishnucast.player.MixerState.alpha01.observeForever(mixObserver)
+
+
 
         isRunning = true
     }
@@ -78,6 +98,13 @@ class CastService : Service() {
         server = null
         try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
         super.onDestroy()
+
+        try {
+            _mixerObserver?.let { com.buligin.vishnucast.player.MixerState.alpha01.removeObserver(it) }
+        } catch (_: Throwable) { }
+        _mixerObserver = null
+
+
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

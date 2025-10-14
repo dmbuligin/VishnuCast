@@ -1,4 +1,4 @@
-package com.buligin.vishnucast.audio
+package com.buligin.vishnucast.player
 
 import android.content.Context
 import android.net.Uri

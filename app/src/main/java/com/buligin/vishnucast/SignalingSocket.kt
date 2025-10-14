@@ -57,6 +57,29 @@ class SignalingSocket(
     handshake: NanoHTTPD.IHTTPSession
 ) : NanoWSD.WebSocket(handshake) {
 
+    companion object {
+
+        private val sockets = java.util.concurrent.CopyOnWriteArraySet<SignalingSocket>()
+
+
+        fun broadcastJson(obj: org.json.JSONObject) {
+            val text = obj.toString()
+            for (ws in sockets) {
+                try { ws.send(text) } catch (_: Throwable) { /* ignore */ }
+            }
+        }
+
+        fun broadcastMix(alpha: Float, micMuted: Boolean) {
+
+            val msg = org.json.JSONObject()
+                .put("type", "mix")
+                .put("alpha", alpha.coerceIn(0f, 1f))
+                .put("micMuted", micMuted)
+            broadcastJson(msg)
+        }
+    }
+
+
     private val webrtc = WebRtcCoreHolder.get(ctx)
     private var pc: org.webrtc.PeerConnection? = null
 
@@ -64,7 +87,9 @@ class SignalingSocket(
     private val counted = AtomicBoolean(false)
     private var pollTimer: Timer? = null
 
-    override fun onOpen() {}
+    override fun onOpen() {
+        sockets.add(this)
+    }
 
     override fun onPong(pong: NanoWSD.WebSocketFrame?) {}
 
@@ -126,6 +151,7 @@ class SignalingSocket(
     }
 
     override fun onClose(code: NanoWSD.WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) {
+        sockets.remove(this)
         stopPolling()
         if (counted.compareAndSet(true, false)) {
             ClientCounterStable.dec()

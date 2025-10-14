@@ -51,7 +51,7 @@ import android.widget.Button
 import android.widget.ImageButton
 import android.view.MotionEvent
 import android.view.ViewConfiguration
-import com.buligin.vishnucast.ui.PlaylistActivity
+import com.buligin.vishnucast.player.PlaylistActivity
 
 
 
@@ -80,7 +80,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var levelBar: ProgressBar
     private lateinit var sliderContainer: FrameLayout
 
-    private var playerUiBinder: com.buligin.vishnucast.ui.PlayerUiBinder? = null
+    private var playerUiBinder: com.buligin.vishnucast.player.PlayerUiBinder? = null
 
     private var fgArrow: Drawable? = null
     private val isRunning = AtomicBoolean(false)
@@ -215,7 +215,7 @@ class MainActivity : AppCompatActivity() {
         updateInputBadge()
 
 
-        playerUiBinder = com.buligin.vishnucast.ui.PlayerUiBinder(this).attach()
+        playerUiBinder = com.buligin.vishnucast.player.PlayerUiBinder(this).attach()
 
 
         // Долгий тап — (un)mute
@@ -328,7 +328,7 @@ class MainActivity : AppCompatActivity() {
         syncUiFromService()
 
         if (playerUiBinder == null) {
-            playerUiBinder = com.buligin.vishnucast.ui.PlayerUiBinder(this).attach()
+            playerUiBinder = com.buligin.vishnucast.player.PlayerUiBinder(this).attach()
         }
 
 
@@ -359,7 +359,7 @@ class MainActivity : AppCompatActivity() {
         R.id.action_refresh -> { refreshNetworkUi(); true }
 
         R.id.action_open_playlist -> {
-            openPlaylist.launch(android.content.Intent(this, com.buligin.vishnucast.ui.PlaylistActivity::class.java))
+            openPlaylist.launch(android.content.Intent(this, com.buligin.vishnucast.player.PlaylistActivity::class.java))
 
 
 

@@ -1,5 +1,4 @@
-package com.buligin.vishnucast.ui
-
+package com.buligin.vishnucast.player
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -11,9 +10,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.Observer
 import com.buligin.vishnucast.R
-import com.buligin.vishnucast.audio.PlayerCore
-import com.buligin.vishnucast.audio.PlaylistStore
-import com.buligin.vishnucast.audio.MixerState
+import com.buligin.vishnucast.player.PlayerCore
+import com.buligin.vishnucast.player.PlaylistStore
+import com.buligin.vishnucast.player.MixerState
 
 /**
  * Ненавязчиво встраивает PlayerCore в существующий экран.
@@ -127,7 +126,10 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                 val a = (progress / 100f).coerceIn(0f, 1f)
                 MixerState.alpha01.postValue(a)
-           //     player.setVolume01(a) // временно как громкость плеера
+                android.util.Log.d("VishnuMix", "UI alpha01=" + a.toString())
+
+
+                //     player.setVolume01(a) // временно как громкость плеера
                 // микрофон сейчас идёт в WebRTC как прежде;
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}

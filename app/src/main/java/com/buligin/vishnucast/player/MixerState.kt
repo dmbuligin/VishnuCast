@@ -1,4 +1,4 @@
-package com.buligin.vishnucast.audio
+package com.buligin.vishnucast.player
 
 import androidx.lifecycle.MutableLiveData
 
@@ -7,3 +7,4 @@ object MixerState {
     val alpha01 = MutableLiveData(0f)
 
 }
+

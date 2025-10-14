@@ -1,4 +1,4 @@
-package com.buligin.vishnucast.ui
+package com.buligin.vishnucast.player
 
 import android.view.LayoutInflater
 import android.view.View
@@ -7,7 +7,7 @@ import android.widget.ImageButton
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.buligin.vishnucast.R
-import com.buligin.vishnucast.audio.PlaylistItem
+import com.buligin.vishnucast.player.PlaylistItem
 import java.util.Collections
 
 class PlaylistAdapter(
