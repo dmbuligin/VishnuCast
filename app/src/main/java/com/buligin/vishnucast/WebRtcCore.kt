@@ -82,11 +82,11 @@ class WebRtcCore(private val ctx: Context) {
 
         // Софт-флаги (AEC/NS/AGC(+2))
         val audioConstraints = MediaConstraints().apply {
-            optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl2", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "false")) //true
+            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "false")) //true
+            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true")) //true
+            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl2", "true")) //true
+            optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "false")) //true
         }
 
         audioSource = factory.createAudioSource(audioConstraints)
