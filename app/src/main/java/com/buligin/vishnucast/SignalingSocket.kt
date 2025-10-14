@@ -61,15 +61,29 @@ class SignalingSocket(
 
         private val sockets = java.util.concurrent.CopyOnWriteArraySet<SignalingSocket>()
 
+        private val wsExec = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "vc-ws-broadcast").apply { isDaemon = true }
+        }
+
 
         fun broadcastJson(obj: org.json.JSONObject) {
             val text = obj.toString()
-            for (ws in sockets) {
-                try { ws.send(text) } catch (_: Throwable) { /* ignore */ }
+            wsExec.execute {
+                for (ws in sockets) {
+                    try {
+                        ws.send(text)
+                        android.util.Log.d("VishnuMix", "WS send OK len=" + text.length)
+                    } catch (t: Throwable) {
+                        android.util.Log.e("VishnuMix", "WS send FAIL: " + t.message, t)
+                    }
+                }
             }
         }
 
+
         fun broadcastMix(alpha: Float, micMuted: Boolean) {
+
+            android.util.Log.d("VishnuMix", "WS broadcastMix alpha=" + alpha + " micMuted=" + micMuted + " sockets=" + sockets.size)
 
             val msg = org.json.JSONObject()
                 .put("type", "mix")
@@ -89,7 +103,22 @@ class SignalingSocket(
 
     override fun onOpen() {
         sockets.add(this)
+        android.util.Log.d("VishnuMix", "WS onOpen sockets=" + sockets.size)
+
+        // Тестовое сообщение клиенту сразу после подключения
+        try {
+            val hello = org.json.JSONObject()
+                .put("type", "mix")
+                .put("alpha", 0.0)
+                .put("micMuted", false)
+            val text = hello.toString()
+            send(text)
+            android.util.Log.d("VishnuMix", "WS onOpen test mix sent len=" + text.length)
+        } catch (t: Throwable) {
+            android.util.Log.e("VishnuMix", "WS onOpen test mix FAIL: " + t.message, t)
+        }
     }
+
 
     override fun onPong(pong: NanoWSD.WebSocketFrame?) {}
 
@@ -152,6 +181,8 @@ class SignalingSocket(
 
     override fun onClose(code: NanoWSD.WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) {
         sockets.remove(this)
+          android.util.Log.d("VishnuMix", "WS onClose sockets=" + sockets.size)
+
         stopPolling()
         if (counted.compareAndSet(true, false)) {
             ClientCounterStable.dec()

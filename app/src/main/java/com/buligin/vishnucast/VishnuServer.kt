@@ -13,6 +13,7 @@ class VishnuServer(
     override fun openWebSocket(handshake: NanoHTTPD.IHTTPSession): WebSocket {
         // handshake ненулевой — NanoWSD сам валидирует
         Logger.d("VishnuWS", "openWebSocket on ${handshake.uri}")
+        android.util.Log.d("VishnuMix", "VishnuServer.openWebSocket: new socket")
         return SignalingSocket(appContext, handshake)
     }
 

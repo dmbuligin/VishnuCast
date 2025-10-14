@@ -131,9 +131,8 @@
  var currentOutStream = null;        // что сейчас выведено в <audio>
  var micStream = null, playerStream = null; // последние MediaStream для MIC/PLAYER
 
+var playerTrackMuted = true; // считаем плеер «тихим», пока не докажем обратное
 
-
-  var currentOutStream = null; // ← что сейчас выведено в <audio>
 
 
   function ensureMixer() {
@@ -170,12 +169,57 @@
     }
   }
 
-  function updateGains() {
-    if (!gainMic || !gainPlayer) return;
-    var a = Math.max(0, Math.min(1, Number(mix.alpha) || 0)); // clamp [0..1]
-    gainPlayer.gain.value = a;
-    gainMic.gain.value = mix.micMuted ? 0 : (1 - a);
+function updateGains() {
+  if (!gainMic || !gainPlayer) return;
+  var a = Math.max(0, Math.min(1, Number(mix.alpha) || 0)); // clamp [0..1]
+
+  // 1) применяем гейны
+  gainPlayer.gain.value = a;
+  gainMic.gain.value = mix.micMuted ? 0 : (1 - a);
+
+  // 2) при каждом изменении mix — корректируем маршрут DIRECT↔MIX
+  try {
+    ensureAudioEl();
+    // есть ли оба источника?
+    var bothPresent = !!micStream && !!playerStream;
+    // MIX включаем только если (оба источника есть) И (playerTrackMuted == false) И (alpha>0 ИЛИ micMuted==true)
+    var useMix = bothPresent && !playerTrackMuted && (mix.micMuted || a > 0);
+
+
+    // выбрать целевой поток:
+    //   MIX → mixOut.stream; иначе — предпочитаем MIC (или PLAYER, если MIC замьючен/отсутствует)
+    var target = (useMix && typeof mixOut !== 'undefined' && mixOut)
+      ? mixOut.stream
+      : (mix.micMuted ? (playerStream || micStream || (audioEl && audioEl.srcObject))
+                      : (micStream || playerStream || (audioEl && audioEl.srcObject)));
+
+    if (target && currentOutStream !== target) {
+      audioEl.muted = false;
+      audioEl.volume = 1.0;
+      audioEl.srcObject = target;
+      currentOutStream = target;
+
+      // лёгкий лог, чтобы видеть переключения
+      var routeTxt = useMix ? ('MIX (alpha=' + a.toFixed(2) + ', micMuted=' + !!mix.micMuted + ')')
+                            : ('DIRECT (alpha=' + a.toFixed(2) + ', micMuted=' + !!mix.micMuted + ')');
+      log('Audio route (by mix):', routeTxt);
+
+      var tries = 0;
+      (function kick(){
+        audioEl.play().then(function(){ log('audio.play OK (by mix)'); }).catch(function(err){
+          tries++;
+          log('audio.play FAIL (by mix) try', tries, err && err.message);
+          if (tries < 5) setTimeout(kick, 300);
+        });
+      })();
+    }
+  } catch (e) {
+    log('updateGains route error:', e && e.message);
   }
+}
+
+
+
 
   // ---------- Language switches ----------
   (function initLang(){
@@ -505,6 +549,25 @@
              srcPlayer = ac.createMediaStreamSource(stream);
              srcPlayer.connect(gainPlayer);
              playerStream = stream; // ← сохранить сам поток
+
+             // следим за состоянием реального аудио в плеер-треке
+             try {
+               if (ev.track) {
+                 playerTrackMuted = !!ev.track.muted;
+                 ev.track.onmute = function(){ playerTrackMuted = true;  updateGains(); };
+                 ev.track.onunmute = function(){ playerTrackMuted = false; updateGains(); };
+               } else {
+                 // на всякий случай проверим по самому stream
+                 var t = (stream.getAudioTracks && stream.getAudioTracks()[0]) || null;
+                 if (t) {
+                   playerTrackMuted = !!t.muted;
+                   t.onmute = function(){ playerTrackMuted = true;  updateGains(); };
+                   t.onunmute = function(){ playerTrackMuted = false; updateGains(); };
+                 }
+               }
+             } catch(_){}
+
+
              log('Mixer attach: PLAYER', 'sid=', sid);
            } else {
              if (srcMic) { try { srcMic.disconnect(); } catch(_){} }
@@ -522,7 +585,7 @@
             ensureAudioEl();
             var bothPresent = !!micStream && !!playerStream;
             var a = Number(mix.alpha) || 0;
-            var useMix = bothPresent && (mix.micMuted || a > 0);
+            var useMix = bothPresent && !playerTrackMuted && (mix.micMuted || a > 0);
 
             // выбираем целевой поток: MIX → mixOut.stream; иначе предпочитаем MIC
             var target = useMix && mixOut
