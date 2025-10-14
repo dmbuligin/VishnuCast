@@ -35,6 +35,16 @@ class WebRtcCore(private val ctx: Context) {
     private val playerSource: AudioSource
     private val playerTrack: AudioTrack
 
+    // RtpSender'ы — чтобы управлять encodings[0].active
+    private var micSender: RtpSender? = null
+    private var playerSender: RtpSender? = null
+
+    // Кэш состояний + троттлинг переключений
+    private var lastActiveMic: Boolean? = null
+    private var lastActivePlayer: Boolean? = null
+    private var lastSwitchAtMs: Long = 0L
+
+
     private val connectedPeerCount = AtomicInteger(0)
     private val muted = AtomicBoolean(true)
 
@@ -303,10 +313,13 @@ class WebRtcCore(private val ctx: Context) {
         createdPc = pc
 
         val sender = pc.addTrack(audioTrack, listOf("vishnu_audio_stream"))
+        micSender = sender
         d("createPeerConnection: addTrack sender=${sender != null}")
 
         val senderPlayer = pc.addTrack(playerTrack, listOf("vishnu_player_stream"))
+        playerSender = senderPlayer
         d("createPeerConnection: addTrack PLAYER sender=${senderPlayer != null}")
+
 
 
         pendingPeerCount.incrementAndGet()
@@ -473,6 +486,67 @@ class WebRtcCore(private val ctx: Context) {
             }, 0L, tick)
         }
     }
+
+    /**
+     * Выключаем неиспользуемые энкодеры на краях фейдера:
+     * alpha ≤ 0.02 → активен только MIC
+     * alpha ≥ 0.98 → активен только PLAYER
+     * Гистерезис + троттлинг: не чаще 4/с.
+     */
+    fun trySetActiveByAlpha(alpha: Float) {
+        val now = System.currentTimeMillis()
+        if (now - lastSwitchAtMs < 250) return // троттлинг 4/с
+
+        val a = alpha.coerceIn(0f, 1f)
+        val wantMicActive    = (a <= 0.02f)
+        val wantPlayerActive = (a >= 0.98f)
+
+        var did = false
+
+        micSender?.let { s ->
+            val prev = lastActiveMic
+            if (prev == null || prev != wantMicActive) {
+                try {
+                    val p = s.parameters
+                    val encs = p.encodings
+                    if (encs.isNotEmpty()) {
+                        if (encs[0].active != wantMicActive) {
+                            encs[0].active = wantMicActive
+                            s.parameters = p
+                            did = true
+                        }
+                    }
+                    lastActiveMic = wantMicActive
+                } catch (_: Throwable) { /* no-op */ }
+            }
+        }
+
+        playerSender?.let { s ->
+            val prev = lastActivePlayer
+            if (prev == null || prev != wantPlayerActive) {
+                try {
+                    val p = s.parameters
+                    val encs = p.encodings
+                    if (encs.isNotEmpty()) {
+                        if (encs[0].active != wantPlayerActive) {
+                            encs[0].active = wantPlayerActive
+                            s.parameters = p
+                            did = true
+                        }
+                    }
+                    lastActivePlayer = wantPlayerActive
+                } catch (_: Throwable) { /* no-op */ }
+            }
+        }
+
+        if (did) {
+            lastSwitchAtMs = now
+            if (LOG_ENABLED) {
+                Log.d("VishnuRTC", "enc.active → mic=$lastActiveMic player=$lastActivePlayer, α=${"%.2f".format(a)}")
+            }
+        }
+    }
+
 
     companion object {
         @Volatile var LEVEL_TICK_MS: Int = 120

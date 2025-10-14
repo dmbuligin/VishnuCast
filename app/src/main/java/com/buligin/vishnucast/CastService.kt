@@ -38,6 +38,8 @@ class CastService : Service() {
             try {
                 android.util.Log.d("VishnuMix", "CastService.observe alpha=" + (a ?: 0f).toString() + " micMuted=" + muted)
                 SignalingSocket.broadcastMix(a ?: 0f, muted)
+                // NEW: экономия трафика на краях фейдера
+                WebRtcCoreHolder.get(applicationContext).trySetActiveByAlpha(a ?: 0f)
                 android.util.Log.d("VishnuMix", "CastService.broadcastMix sent")
             } catch (_: Throwable) { }
         }
