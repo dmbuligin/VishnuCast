@@ -197,27 +197,39 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
 
     private fun releaseSystemCaptureIfQ() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try { com.buligin.vishnucast.player.capture.PlayerSystemCapture.release() } catch (_: Throwable) {}
+            try { PlayerSystemCapture.release() } catch (_: Throwable) {}
         }
     }
 
 
     override fun onStateChanged(source: androidx.lifecycle.LifecycleOwner, event: Lifecycle.Event) {
-        if (event == Lifecycle.Event.ON_DESTROY) {
-            releaseSystemCaptureIfQ()
+        when (event) {
+            Lifecycle.Event.ON_DESTROY -> {
+                // Гасим только при реальном закрытии экрана (не при поворотах/навигации)
+                val finishing = activity.isFinishing || (!activity.isChangingConfigurations)
+                if (finishing) {
+                    if (this::player.isInitialized && player.isPlaying.value == true) {
+                        player.pause()
+                    }
+                    releaseSystemCaptureIfQ() // включает stop() + release()
+                }
+            }
+            else -> { /* no-op */ }
         }
     }
+
+
 
     // --- helpers ---
 
     private fun startSystemCaptureIfQ() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try { com.buligin.vishnucast.player.capture.PlayerSystemCapture.start(activity) } catch (_: Throwable) {}
+            try { PlayerSystemCapture.start(activity) } catch (_: Throwable) {}
         }
     }
     private fun stopSystemCaptureIfQ() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try { com.buligin.vishnucast.player.capture.PlayerSystemCapture.stop() } catch (_: Throwable) {}
+            try { PlayerSystemCapture.stop() } catch (_: Throwable) {}
         }
     }
 

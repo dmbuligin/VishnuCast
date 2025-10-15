@@ -22,8 +22,11 @@ import androidx.core.content.ContextCompat
 
 
 
+
 @RequiresApi(Build.VERSION_CODES.Q)
 object PlayerSystemCapture {
+
+    private const val TAG = "VishnuCapture"
     private const val SR = 48000
     private const val CH = AudioFormat.CHANNEL_IN_MONO
     private const val EN = AudioFormat.ENCODING_PCM_16BIT
@@ -34,15 +37,35 @@ object PlayerSystemCapture {
     @Volatile private var projection: MediaProjection? = null
 
     fun start(activity: Activity) {
+        Log.d(TAG, "start() requested")
+
         if (enginePtr == 0L) enginePtr = PlayerJni.createEngine()
-        if (recordingThread != null) return
+        if (recordingThread != null) {
+            Log.d(TAG, "already running; skip")
+            return
+        }
 
         val mpm = activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val data = PlayerCapture.resultData ?: return
         val code = PlayerCapture.resultCode
-        if (code != Activity.RESULT_OK) return
 
-        projection = mpm.getMediaProjection(code, data) ?: return
+        if (data == null) {
+            Log.w(TAG, "projection data is null; did user grant permission?")
+            return
+        }
+        if (code != Activity.RESULT_OK) {
+            Log.w(TAG, "projection resultCode != OK ($code)")
+            return
+        }
+
+        Log.d(TAG, "calling getMediaProjection(...)")
+        projection = mpm.getMediaProjection(code, data) ?: run {
+            Log.e(TAG, "getMediaProjection returned null")
+            return
+
+        }
+        Log.d(TAG, "MediaProjection acquired")
+
 
         val config = AudioPlaybackCaptureConfiguration.Builder(projection!!)
             // Можно сузить до USAGE_MEDIA/USAGE_GAME при желании:
@@ -56,7 +79,7 @@ object PlayerSystemCapture {
         ) == PackageManager.PERMISSION_GRANTED
 
         if (!hasRecordAudio) {
-            Log.w("VishnuCapture", "RECORD_AUDIO not granted; skip start()")
+            Log.w(TAG, "RECORD_AUDIO not granted; skip start()")
             return
         }
         val rec = try {
@@ -72,20 +95,21 @@ object PlayerSystemCapture {
                 .setAudioPlaybackCaptureConfig(config)
                 .build()
         } catch (se: SecurityException) {
-            Log.e("VishnuCapture", "AudioRecord build SecurityException", se)
+            Log.e(TAG, "AudioRecord build SecurityException", se)
             return
         }
 
-
+        Log.d(TAG, "AudioRecord built (minBuf=$minBuf)")
         record = rec
         try {
             if (rec.state != AudioRecord.STATE_INITIALIZED) {
-                Log.e("VishnuCapture", "AudioRecord not initialized (state=${rec.state})")
+                Log.e(TAG, "AudioRecord not initialized (state=${rec.state})")
                 return
             }
             rec.startRecording()
+            Log.d(TAG, "AudioRecord.startRecording OK")
         } catch (se: SecurityException) {
-            Log.e("VishnuCapture", "startRecording SecurityException", se)
+            Log.e(TAG, "startRecording SecurityException", se)
             return
         }
 
@@ -94,6 +118,8 @@ object PlayerSystemCapture {
             val frame = ShortArray(480)
             val temp = ShortArray(4800) // буфер для донабора
             var tempLen = 0
+
+            Log.d(TAG, "capture thread started (10ms frames)")
 
             while (!Thread.currentThread().isInterrupted) {
                 val r = rec.read(temp, tempLen, temp.size - tempLen)
@@ -126,6 +152,8 @@ object PlayerSystemCapture {
     }
 
     fun stop() {
+        Log.d(TAG, "stop() requested")
+
         try { recordingThread?.interrupt() } catch (_: Throwable) {}
         try { recordingThread?.join(200) } catch (_: Throwable) {}
         recordingThread = null
@@ -133,9 +161,12 @@ object PlayerSystemCapture {
         try { record?.stop() } catch (_: Throwable) {}
         try { record?.release() } catch (_: Throwable) {}
         record = null
+        Log.d(TAG, "AudioRecord released")
 
         try { projection?.stop() } catch (_: Throwable) {}
         projection = null
+        Log.d(TAG, "MediaProjection stopped")
+
     }
 
     fun setMuted(muted: Boolean) {
@@ -146,11 +177,15 @@ object PlayerSystemCapture {
     }
 
     fun release() {
+        Log.d(TAG, "release() requested")
+
         stop()
         val ptr = enginePtr
         if (ptr != 0L) {
             try { PlayerJni.destroyEngine(ptr) } catch (_: Throwable) {}
         }
         enginePtr = 0L
+        Log.d(TAG, "JNI engine destroyed")
+
     }
 }

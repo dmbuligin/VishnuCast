@@ -59,6 +59,14 @@
             </intent-filter>
         </activity>
 
+
+        <activity
+            android:name=".player.PlaylistActivity"
+            android:exported="false"
+            android:label="@string/cast_playlist_title"
+            android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar" />
+
+
         <!-- Сервис: стартуем как DATA_SYNC, при UNMUTE перевзводим на MICROPHONE -->
         <service
             android:name=".CastService"
@@ -87,10 +95,6 @@
         </provider>
 
 
-        <activity
-            android:name=".ui.PlaylistActivity"
-            android:exported="false"
-            android:label="@string/cast_playlist_title" />
 
 
 
