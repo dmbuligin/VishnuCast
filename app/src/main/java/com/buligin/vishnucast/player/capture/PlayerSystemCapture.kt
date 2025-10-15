@@ -15,6 +15,11 @@ import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import com.buligin.vishnucast.player.jni.PlayerJni
 import kotlin.concurrent.thread
+import android.media.AudioAttributes
+
+
+
+
 
 /**
  * Захват системного аудио (Android 10+) и подача в JNI 10мс фреймами (48k mono, s16).
@@ -93,9 +98,13 @@ object PlayerSystemCapture {
 
         // 4) Готовим конфигурацию AudioPlaybackCapture
         val config = AudioPlaybackCaptureConfiguration.Builder(mp)
-            // При необходимости можно ограничить по USAGE:
-            // .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+            // Минимум одно правило обязательно, иначе IllegalArgumentException.
+            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)               // медиа-воспроизведение (ExoPlayer)
+            .addMatchingUsage(AudioAttributes.USAGE_GAME)                // на всякий случай (если поменяешь атрибуты)
+            .addMatchingUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION) // системные «бипы» внутри твоего процесса
+            .addMatchingUid(activity.applicationInfo.uid)                // гарантируем захват СВОЕГО плеера
             .build()
+
 
         // 5) Создаём JNI-движок один раз
         if (enginePtr == 0L) {
