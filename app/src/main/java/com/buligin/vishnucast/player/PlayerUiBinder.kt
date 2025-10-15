@@ -1,18 +1,26 @@
 package com.buligin.vishnucast.player
+
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.widget.ImageButton
 import android.widget.SeekBar
 import android.widget.TextView
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.Observer
 import com.buligin.vishnucast.R
-import com.buligin.vishnucast.player.PlayerCore
-import com.buligin.vishnucast.player.PlaylistStore
-import com.buligin.vishnucast.player.MixerState
+import com.buligin.vishnucast.player.capture.PlayerCapture
+import com.buligin.vishnucast.player.capture.PlayerSystemCapture
+import android.os.Build
+
+
+
+
 
 /**
  * Ненавязчиво встраивает PlayerCore в существующий экран.
@@ -35,6 +43,10 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
 
     // MIXER: crossfader
     private var cross: SeekBar? = null
+
+    // MediaProjection launcher
+    private var projectionLauncher: ActivityResultLauncher<Intent>? = null
+    private var onProjectionGranted: (() -> Unit)? = null
 
     private val uiHandler = Handler(Looper.getMainLooper())
     private val ticker = object : Runnable {
@@ -64,9 +76,6 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         } else {
             player.setPlaylist(list, player.currentIndex().coerceAtLeast(0))
         }
-
-
-
     }
 
     fun attach(root: View = activity.findViewById(android.R.id.content)): PlayerUiBinder {
@@ -92,26 +101,54 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         // Начальное состояние enable/disable
         setControlsEnabled(playlistStore.load().isNotEmpty())
 
+        // Регистрация лаунчера системного запроса MediaProjection
+        projectionLauncher = activity.registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { res ->
+            PlayerCapture.onProjectionResult(res.resultCode, res.data)
+            val action = onProjectionGranted
+            onProjectionGranted = null
+            if (PlayerCapture.isGranted()) {
+                action?.invoke()
+            }
+        }
+
         btnPrev?.setOnClickListener {
             if (playlistStore.load().isNotEmpty()) {
                 player.previous()
                 // оставляем на паузе — единообразно с тапом по элементу
                 player.pause(); player.seekTo(0L)
-            }
-        }
-        btnNext?.setOnClickListener {
-            if (playlistStore.load().isNotEmpty()) {
-                player.next()
-                player.play()
+                stopSystemCaptureIfQ()
             }
         }
 
-        btnPlayPause?.setOnClickListener { player.toggle() }
+        btnNext?.setOnClickListener {
+            if (playlistStore.load().isNotEmpty()) {
+                player.next()
+                maybeStartWithProjection {
+                    player.play()
+                    startSystemCaptureIfQ()
+                }
+            }
+        }
+
+        btnPlayPause?.setOnClickListener {
+            if (player.isPlaying.value == true) {
+                player.pause()
+                stopSystemCaptureIfQ()
+            } else {
+                maybeStartWithProjection {
+                    player.play()
+                    startSystemCaptureIfQ()
+                }
+            }
+        }
 
         /* Долгий тап = STOP */
         btnPlayPause?.setOnLongClickListener {
             player.pause()
             player.seekTo(0L)
+            stopSystemCaptureIfQ()
             true
         }
 
@@ -121,26 +158,17 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
 
-        // MIXER: кросс-фейдер — публикуем α и регулируем громкость плеера прямо сейчас (B1)
+        // MIXER: кросс-фейдер — публикуем α
         cross?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                 val a = (progress / 100f).coerceIn(0f, 1f)
                 MixerState.alpha01.postValue(a)
-                android.util.Log.d("VishnuMix", "UI alpha01=" + a.toString())
-
-
-                //     player.setVolume01(a) // временно как громкость плеера
-                // микрофон сейчас идёт в WebRTC как прежде;
+                android.util.Log.d("VishnuMix", "UI alpha01=$a")
+                // player.setVolume01(a) // при необходимости — как «грубой» громкости плеера
             }
             override fun onStartTrackingTouch(sb: SeekBar?) {}
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
-
-     //   // Подпишем α на случай внешних изменений (например, mute логика)
-     //   MixerState.alpha01.observe(activity, Observer { a ->
-     //       cross?.progress = (a * 100).toInt()
-     //       player.setVolume01(a)
-     //   })
 
         // Наблюдатели плеера
         player.title.observe(activity, Observer { title ->
@@ -167,19 +195,48 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         return this
     }
 
-    fun release() {
-        uiHandler.removeCallbacksAndMessages(null)
-        if (this::player.isInitialized) player.release()
-        activity.lifecycle.removeObserver(this)
+    private fun releaseSystemCaptureIfQ() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try { com.buligin.vishnucast.player.capture.PlayerSystemCapture.release() } catch (_: Throwable) {}
+        }
     }
+
 
     override fun onStateChanged(source: androidx.lifecycle.LifecycleOwner, event: Lifecycle.Event) {
         if (event == Lifecycle.Event.ON_DESTROY) {
-            release()
+            releaseSystemCaptureIfQ()
         }
     }
 
     // --- helpers ---
+
+    private fun startSystemCaptureIfQ() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try { com.buligin.vishnucast.player.capture.PlayerSystemCapture.start(activity) } catch (_: Throwable) {}
+        }
+    }
+    private fun stopSystemCaptureIfQ() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try { com.buligin.vishnucast.player.capture.PlayerSystemCapture.stop() } catch (_: Throwable) {}
+        }
+    }
+
+
+
+
+    private fun maybeStartWithProjection(action: () -> Unit) {
+        if (PlayerCapture.isGranted()) {
+            action()
+            return
+        }
+        onProjectionGranted = action
+        try {
+            val intent = PlayerCapture.createRequestIntent(activity)
+            projectionLauncher?.launch(intent)
+        } catch (_: Throwable) {
+            // тихо игнорируем, UI не падает
+        }
+    }
 
     private fun resetUiToDefaults() {
         tvTitle?.text = activity.getString(R.string.cast_player_title)

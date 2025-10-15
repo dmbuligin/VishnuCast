@@ -1,19 +1,17 @@
 #include "PlayerSendEngine.h"
-// Заглушки: настоящую интеграцию с webrtc добавим после включения CMake
+#include <android/log.h>
+
+#define LOG_TAG "VishnuJNI"
 
 PlayerSendEngine::PlayerSendEngine() {}
 PlayerSendEngine::~PlayerSendEngine() {}
 
-webrtc::AudioTrackSourceInterface* PlayerSendEngine::createSource() {
-    // TODO: вернуть реальный webrtc::AudioTrackSourceInterface
-    return nullptr;
-}
-
 void PlayerSendEngine::pushPcm48kMono(const int16_t* /*data*/, int /*samples*/) {
     if (muted_) return;
-    // TODO: положить 10мс фрейм в транспорт webrtc
+    // Скелет: позже здесь положим фрейм в аудио-транспорт WebRTC.
+    // Сейчас — no-op.
 }
 
-void PlayerSendEngine::setMuted(bool m) {
-    muted_.store(m);
+void PlayerSendEngine::setMuted(bool muted) {
+    muted_.store(muted);
 }

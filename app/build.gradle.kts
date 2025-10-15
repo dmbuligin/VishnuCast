@@ -38,7 +38,7 @@ val buildTimeUtc: String = ZonedDateTime.now(ZoneOffset.UTC)
 android {
     namespace = "com.buligin.vishnucast"
     compileSdk = 36
-
+    ndkVersion = "27.0.12077973"
 
     val versionMajor = 2
     val versionMinor = 0
@@ -63,10 +63,9 @@ android {
         buildConfigField("String", "BUILD_TIME", "\"$buildTimeUtc\"")
         buildConfigField("String", "APP_VERSION", "\"$verName\"")
 
-        defaultConfig {
-            vectorDrawables { useSupportLibrary = true }
-        }
+        vectorDrawables { useSupportLibrary = true }
 
+        ndk { abiFilters += listOf("arm64-v8a") }
 
 
     }
@@ -79,6 +78,8 @@ android {
         debug {
             versionNameSuffix = "-dev+$gitSha"
             isMinifyEnabled = false
+
+            ndk { debugSymbolLevel = "FULL" }
         }
         release {
             isMinifyEnabled = false
@@ -95,6 +96,13 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+        }
+
     }
 }
 
