@@ -50,6 +50,10 @@ object PlayerSystemCapture {
     fun start(activity: Activity) {
         Log.d(TAG, "start() requested")
 
+        // полезно оставить след кто нас позвал
+        Log.d(TAG, "reason=start_by_alpha") // раскомментируй, если хочешь видеть источник
+
+
         // Защита от повторного старта
         if (recordingThread != null) {
             Log.d(TAG, "already running; skip")

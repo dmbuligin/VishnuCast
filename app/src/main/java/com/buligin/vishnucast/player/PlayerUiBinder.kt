@@ -197,6 +197,29 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
             tvDur?.text = formatMs(d)
         })
 
+// Реагируем на кроссфейдер: при α>0.02 держим системный захват, при α<=0.02 — гасим
+        MixerState.alpha01.observe(activity, Observer { a ->
+            val alpha = (a ?: 0f).coerceIn(0f, 1f)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val running = PlayerSystemCapture.isRunning()
+                val playing = (player.isPlaying.value == true)
+
+                if (alpha > 0.02f && playing) {
+                    // нужен захват (если ещё не запущен — стартуем)
+                    if (!running) {
+                        try { PlayerSystemCapture.start(activity) } catch (_: Throwable) {}
+                    }
+                } else {
+                    // не нужен — гасим (если был запущен)
+                    if (running) {
+                        try { PlayerSystemCapture.stop() } catch (_: Throwable) {}
+                    }
+                }
+            }
+        })
+
+
+
         // Авто-тикер
         uiHandler.post(ticker)
 
