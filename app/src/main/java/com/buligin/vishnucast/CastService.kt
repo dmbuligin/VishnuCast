@@ -114,15 +114,18 @@ class CastService : Service() {
     // --- FGS helper ---
     private fun startAsForeground(withMicType: Boolean) {
         val notif = buildRunningNotification()
-        if (Build.VERSION.SDK_INT >= 29) {
-            val type = if (withMicType)
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            else
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            startForeground(NOTIF_ID, notif, type)
+        val fgsTypes =
+            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            startForeground(NOTIF_ID, notif, fgsTypes)
         } else {
             startForeground(NOTIF_ID, notif)
         }
+
+
         isFgShown = true
     }
 
