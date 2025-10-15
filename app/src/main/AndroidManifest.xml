@@ -29,6 +29,11 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
 
+    <!--  Разрешение на FGS для MediaProjection -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+
+
 
     <application
         android:name=".App"
@@ -71,7 +76,8 @@
         <service
             android:name=".CastService"
             android:exported="false"
-            android:foregroundServiceType="dataSync|microphone" />
+            android:foregroundServiceType="dataSync|microphone"
+            android:stopWithTask="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
