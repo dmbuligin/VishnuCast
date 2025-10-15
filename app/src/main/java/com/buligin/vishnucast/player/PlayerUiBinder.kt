@@ -21,12 +21,12 @@ import android.os.Build
 
 
 
-
 /**
  * Ненавязчиво встраивает PlayerCore в существующий экран.
  * НИКАК не трогает остальной код MainActivity.
  */
 class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventObserver {
+
 
     private val app get() = activity.applicationContext
 
@@ -110,8 +110,18 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
             onProjectionGranted = null
             if (PlayerCapture.isGranted()) {
                 action?.invoke()
+                // NEW: через ~150 мс повторим play, если ExoPlayer всё ещё стоит
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    try {
+                        if (player.isPlaying.value != true) {
+                            android.util.Log.d("VishnuCapture", "replay after projection")
+                            player.play()
+                        }
+                    } catch (_: Throwable) {}
+                }, 150)
             }
         }
+
 
         btnPrev?.setOnClickListener {
             if (playlistStore.load().isNotEmpty()) {

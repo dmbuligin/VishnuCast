@@ -8,12 +8,26 @@ import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.Player
+import com.google.android.exoplayer2.C
+import com.google.android.exoplayer2.audio.AudioAttributes
+
+
+
+
+
 
 class PlayerCore(context: Context) {
 
     private val app: Context = context.applicationContext
     private val exo: ExoPlayer = ExoPlayer.Builder(app).build().apply {
         repeatMode = Player.REPEAT_MODE_OFF
+        setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build(),
+            /* handleAudioFocus = */ true
+        )
     }
 
     private val _isPlaying = MutableLiveData(false)
