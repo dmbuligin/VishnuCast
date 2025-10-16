@@ -8,9 +8,11 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-
+import android.util.Log
 
 class CastService : Service() {
+
+    private lateinit var core: WebRtcCore
 
     private var _mixerObserver: androidx.lifecycle.Observer<Float>? = null
 
@@ -103,6 +105,12 @@ class CastService : Service() {
         try { server?.shutdown() } catch (_: Throwable) {}
         server = null
         try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
+
+        try {
+            core.dispose()
+            Log.d("CastService", "core.dispose() called onDestroy()")
+        } catch (_: Throwable) {}
+
         super.onDestroy()
 
         try {
