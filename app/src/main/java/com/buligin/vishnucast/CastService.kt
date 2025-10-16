@@ -36,10 +36,14 @@ class CastService : Service() {
             val muted = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MUTED, true)
 
             try {
-                android.util.Log.d("VishnuMix", "CastService.observe alpha=" + (a ?: 0f).toString() + " micMuted=" + muted)
-                SignalingSocket.broadcastMix(a ?: 0f, muted)
-                // NEW: экономия трафика на краях фейдера
-                WebRtcCoreHolder.get(applicationContext).trySetActiveByAlpha(a ?: 0f)
+
+                val alpha = (a ?: 0f).coerceIn(0f, 1f)
+                android.util.Log.d("VishnuMix", "CastService.observe alpha=$alpha micMuted=$muted")
+                SignalingSocket.broadcastMix(alpha, muted)
+                WebRtcCoreHolder.get(applicationContext).trySetActiveByAlpha(alpha)
+                WebRtcCoreHolder.get(applicationContext).setForceProbeByAlpha(alpha, muted)
+
+
                 android.util.Log.d("VishnuMix", "CastService.broadcastMix sent")
             } catch (_: Throwable) { }
         }

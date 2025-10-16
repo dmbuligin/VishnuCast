@@ -55,6 +55,10 @@ class WebRtcCore(private val ctx: Context) {
     @Volatile private var lastDuration: Double? = null
     @Volatile private var shownLevel01: Double = 0.0
 
+    // Если true, принудительно используем локальный MicLevelProbe (например, α≈0)
+    @Volatile private var forceProbeDueToAlpha: Boolean = false
+
+
     // Зонд микрофона для режима «нет клиентов»
     private val probe = MicLevelProbe(ctx)
 
@@ -145,6 +149,30 @@ class WebRtcCore(private val ctx: Context) {
         val statsActive = (statsPc != null && statsTimer != null)
         val pending = pendingPeerCount.get()
         val hasActiveOrPending = (clients + pending) > 0
+
+        // Если α≈0 и микрофон не мутирован — принудительно используем локальный пробник,
+        // потому что RTP MIC отключён (enc.active=false) и stats не даст уровня.
+        if (!isMuted && forceProbeDueToAlpha) {
+            if (statsActive) {
+                try { statsTimer?.cancel() } catch (_: Throwable) {}
+                statsTimer = null
+                statsPc = null
+                d("guard: stopped stats (alpha edge)")
+            }
+            if (!probeRunning) {
+                probe.setRelease(LEVEL_RELEASE_PER_SEC)
+                probe.setTickMs(LEVEL_TICK_MS)
+                probe.start { level01 -> onExternalLevel(level01) }
+                d("guard: started probe (alpha edge)")
+            }
+            // Не продолжаем стандартную ветку: мы уже выбрали источник уровня
+            d("guard: hb (alphaEdge=true) muted=$isMuted clients=$clients probe=${probe.isRunning()} stats=${statsPc!=null && statsTimer!=null}")
+            return
+        }
+
+
+
+
 
         if (isMuted) {
             if (probeRunning) { probe.stop(); d("guard: stopped probe (muted)") }
@@ -546,6 +574,23 @@ class WebRtcCore(private val ctx: Context) {
             }
         }
     }
+
+
+    /**
+     * Подсказка для источника индикатора уровня:
+     * при α≤0.02 и micMuted=false → показываем уровень из локального MicLevelProbe,
+     * даже если есть клиенты (т.к. RTP MIC выключен active=false и stats молчит).
+     */
+    fun setForceProbeByAlpha(alpha: Float, micMuted: Boolean) {
+        val want = (!micMuted)   // <— больше не завязаны на alpha
+        if (forceProbeDueToAlpha != want) {
+            forceProbeDueToAlpha = want
+            d("level: forceProbeDueToAlpha=$want α=${"%.2f".format(alpha)} micMuted=$micMuted")
+            enforceRoutingConsistency()
+        }
+    }
+
+
 
 
     companion object {
