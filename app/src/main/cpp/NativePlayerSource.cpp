@@ -2,8 +2,7 @@
 #include <algorithm>
 
 NativePlayerSource::NativePlayerSource(int sampleRate, int channels)
-        : sr_(sampleRate), ch_(channels), frame_samples_(480), last_frame_(480, 0) {
-}
+        : sr_(sampleRate), ch_(channels), frame_samples_(480), last_frame_(480, 0) {}
 
 NativePlayerSource::~NativePlayerSource() = default;
 

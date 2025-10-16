@@ -5,10 +5,9 @@
 #include <mutex>
 
 /**
- * NativePlayerSource — заготовка нативного аудио-источника под WebRTC.
- * Принимает 10мс фреймы PCM 48k mono s16 через pushPcm48kMono(...).
- * На этом шаге хранит последние фреймы в кольцевом буфере (без webrtc::...).
- * Следующим шагом будет интеграция с libwebrtc (AudioSourceInterface).
+ * NativePlayerSource — буфер 10мс @ 48k mono s16.
+ * Сейчас просто хранит последний фрейм — для отладки и подготовки.
+ * Следующим шагом подключим его к libwebrtc как AudioSource.
  */
 class NativePlayerSource {
 public:
@@ -18,7 +17,6 @@ public:
     void pushPcm48kMono(const int16_t* data, int samples);
     void setMuted(bool muted);
 
-    // Вспомогательное API на будущее: получить копию последнего 10мс фрейма
     bool readLastFrame(std::vector<int16_t>& out);
 
 private:

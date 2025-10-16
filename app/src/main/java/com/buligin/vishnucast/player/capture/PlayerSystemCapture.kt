@@ -39,9 +39,17 @@ object PlayerSystemCapture {
     private const val FRAME_SAMPLES = 480 // 10 мс @ 48k
 
     @Volatile private var enginePtr: Long = 0L
+
+    @Volatile private var nativeSourcePtr: Long = 0L
+
     @Volatile private var projection: MediaProjection? = null
     @Volatile private var record: AudioRecord? = null
     @Volatile private var recordingThread: Thread? = null
+
+
+    fun setNativeSourceHandle(ptr: Long) {
+        nativeSourcePtr = ptr
+    }
 
     /** Быстрая проверка для вызвавшего кода (без крашей на старых API). */
     fun isRunning(): Boolean = recordingThread?.isAlive == true
@@ -197,6 +205,17 @@ object PlayerSystemCapture {
                     off += FRAME_SAMPLES
                     try {
                         PlayerJni.pushPcm48kMono(enginePtr, frame, FRAME_SAMPLES)
+
+                        val src = nativeSourcePtr
+                        if (src != 0L) {
+                            try {
+                                PlayerJni.sourcePushPcm48kMono(src, frame, FRAME_SAMPLES)
+                            } catch (t: Throwable) {
+                                Log.e(TAG, "JNI sourcePushPcm failed", t)
+                            }
+                        }
+
+
                     } catch (t: Throwable) {
                         Log.e(TAG, "JNI pushPcm failed", t)
                         // продолжаем пытаться
@@ -238,6 +257,9 @@ object PlayerSystemCapture {
         } catch (_: Throwable) {}
         projection = null
 
+        nativeSourcePtr = 0L
+
+
         Log.d(TAG, "AudioRecord released")
         Log.d(TAG, "MediaProjection stopped")
     }
@@ -254,6 +276,10 @@ object PlayerSystemCapture {
             } catch (_: Throwable) {}
         }
         enginePtr = 0L
+
+        nativeSourcePtr = 0L
+
+
     }
 
     /** Установить mute в JNI (без остановки захвата). */

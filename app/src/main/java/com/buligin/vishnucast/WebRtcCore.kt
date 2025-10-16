@@ -21,16 +21,16 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import com.buligin.vishnucast.player.jni.PlayerJni
-
-
+import com.buligin.vishnucast.player.capture.PlayerSystemCaptureCompat
+import android.os.Build
 
 
 
 
 class WebRtcCore(private val ctx: Context) {
 
+    // Хэндл нативного источника PLAYER (живет весь жизненный цикл core)
     private var nativePlayerSrcHandle: Long = 0L
-
 
     private val pendingPeerCount = AtomicInteger(0)
     private var guardTimer: Timer? = null
@@ -53,7 +53,6 @@ class WebRtcCore(private val ctx: Context) {
     private var lastActivePlayer: Boolean? = null
     private var lastSwitchAtMs: Long = 0L
 
-
     private val connectedPeerCount = AtomicInteger(0)
     private val muted = AtomicBoolean(true)
 
@@ -66,7 +65,6 @@ class WebRtcCore(private val ctx: Context) {
 
     // Если true, принудительно используем локальный MicLevelProbe (например, α≈0)
     @Volatile private var forceProbeDueToAlpha: Boolean = false
-
 
     // Зонд микрофона для режима «нет клиентов»
     private val probe = MicLevelProbe(ctx)
@@ -116,7 +114,6 @@ class WebRtcCore(private val ctx: Context) {
         audioTrack  = factory.createAudioTrack("ARDAMSa0", audioSource)
         audioTrack.setEnabled(true)
 
-
         val playerConstraints = MediaConstraints().apply {
             optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "false"))
             optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "false"))
@@ -128,16 +125,14 @@ class WebRtcCore(private val ctx: Context) {
         playerTrack  = factory.createAudioTrack("VC_PLAYER_0", playerSource)
         playerTrack.setEnabled(true)
 
-        // — NATIVE player source (пока только инициализируем, не подключая к PC)
+        // — NATIVE player source (создаём один раз и связываем с системным захватчиком)
         try {
             nativePlayerSrcHandle = PlayerJni.createSource()
-            Log.d("VishnuRTC", "playerTrack (NATIVE) handle=${nativePlayerSrcHandle}")
+            PlayerSystemCaptureCompat.setNativeSourceHandleCompat(nativePlayerSrcHandle)
+            Log.d("VishnuRTC", "playerTrack (NATIVE handle) = $nativePlayerSrcHandle")
         } catch (t: Throwable) {
             Log.w("VishnuRTC", "createSource failed: ${t.message}")
         }
-
-
-
 
         // Стартуем в mute → «пустой поток»
         adm.setMicrophoneMute(true)
@@ -185,10 +180,6 @@ class WebRtcCore(private val ctx: Context) {
             d("guard: hb (alphaEdge=true) muted=$isMuted clients=$clients probe=${probe.isRunning()} stats=${statsPc!=null && statsTimer!=null}")
             return
         }
-
-
-
-
 
         if (isMuted) {
             if (probeRunning) { probe.stop(); d("guard: stopped probe (muted)") }
@@ -256,6 +247,7 @@ class WebRtcCore(private val ctx: Context) {
         muted.set(mutedNow)
         try { adm.setMicrophoneMute(mutedNow) } catch (_: Throwable) {}
         try { audioTrack.setEnabled(true) } catch (_: Throwable) {}
+
         if (mutedNow) {
             shownLevel01 = 0.0
             SignalLevel.post(0)
@@ -273,13 +265,14 @@ class WebRtcCore(private val ctx: Context) {
             }
         }
 
+        // ✨ ВАЖНО: mute синхронизируем с нативным источником, НО его НЕ уничтожаем.
         try {
             val ptr = nativePlayerSrcHandle
-            if (ptr != 0L) PlayerJni.sourceSetMuted(ptr, mutedNow)
+            if (ptr != 0L) {
+                PlayerJni.sourceSetMuted(ptr, mutedNow)
+                Log.d("VishnuRTC", "NativePlayerSource mute=$mutedNow")
+            }
         } catch (_: Throwable) {}
-
-
-
     }
 
     private fun onExternalLevel(level01: Double) {
@@ -371,8 +364,6 @@ class WebRtcCore(private val ctx: Context) {
         val senderPlayer = pc.addTrack(playerTrack, listOf("vishnu_player_stream"))
         playerSender = senderPlayer
         d("createPeerConnection: addTrack PLAYER sender=${senderPlayer != null}")
-
-
 
         pendingPeerCount.incrementAndGet()
         statsPc = pc
@@ -599,7 +590,6 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
-
     /**
      * Подсказка для источника индикатора уровня:
      * при α≤0.02 и micMuted=false → показываем уровень из локального MicLevelProbe,
@@ -614,8 +604,21 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
-
-
+    /**
+     * Явное освобождение нативного источника и отвязка от системного захвата.
+     * Вызвать при полном завершении core (остановка сервиса/приложения).
+     */
+    fun dispose() {
+        try {
+            val ptr = nativePlayerSrcHandle
+            if (ptr != 0L) {
+                PlayerSystemCaptureCompat.setNativeSourceHandleCompat(0L)
+                PlayerJni.destroySource(ptr)
+                nativePlayerSrcHandle = 0L
+                d("dispose: NativePlayerSource destroyed and unbound")
+            }
+        } catch (_: Throwable) {}
+    }
 
     companion object {
         @Volatile var LEVEL_TICK_MS: Int = 120
