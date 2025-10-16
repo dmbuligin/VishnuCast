@@ -20,8 +20,17 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
+import com.buligin.vishnucast.player.jni.PlayerJni
+
+
+
+
+
 
 class WebRtcCore(private val ctx: Context) {
+
+    private var nativePlayerSrcHandle: Long = 0L
+
 
     private val pendingPeerCount = AtomicInteger(0)
     private var guardTimer: Timer? = null
@@ -119,6 +128,13 @@ class WebRtcCore(private val ctx: Context) {
         playerTrack  = factory.createAudioTrack("VC_PLAYER_0", playerSource)
         playerTrack.setEnabled(true)
 
+        // — NATIVE player source (пока только инициализируем, не подключая к PC)
+        try {
+            nativePlayerSrcHandle = PlayerJni.createSource()
+            Log.d("VishnuRTC", "playerTrack (NATIVE) handle=${nativePlayerSrcHandle}")
+        } catch (t: Throwable) {
+            Log.w("VishnuRTC", "createSource failed: ${t.message}")
+        }
 
 
 
@@ -256,6 +272,14 @@ class WebRtcCore(private val ctx: Context) {
                 d("setMuted: probe start (no clients)")
             }
         }
+
+        try {
+            val ptr = nativePlayerSrcHandle
+            if (ptr != 0L) PlayerJni.sourceSetMuted(ptr, mutedNow)
+        } catch (_: Throwable) {}
+
+
+
     }
 
     private fun onExternalLevel(level01: Double) {
