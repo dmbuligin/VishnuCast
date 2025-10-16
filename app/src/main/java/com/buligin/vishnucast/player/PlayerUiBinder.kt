@@ -200,6 +200,15 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
 // Реагируем на кроссфейдер: при α>0.02 держим системный захват, при α<=0.02 — гасим
         MixerState.alpha01.observe(activity, Observer { a ->
             val alpha = (a ?: 0f).coerceIn(0f, 1f)
+
+            // ВРЕМЕННО: проверяем, что приходит alpha и текущее состояние плеера/захвата
+           // val running = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+           //     com.buligin.vishnucast.player.capture.PlayerSystemCapture.isRunning()
+          //  else
+            //    false
+//            android.util.Log.d("VishnuMix", "alpha tick a=$alpha playing=${player.isPlaying.value} running=$running")
+
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val running = PlayerSystemCapture.isRunning()
                 val playing = (player.isPlaying.value == true)
