@@ -33,8 +33,7 @@ add_library(
         NativePlayerSource.cpp
         PlayerSendEngine.cpp
         PlayerJniBridge.cpp
-        # Если уже добавляли NativePlayerSourceWebRtc.cpp — раскомментируйте:
-        # NativePlayerSourceWebRtc.cpp
+        NativePlayerSourceWebRtc.cpp
 )
 
 # Подключаем include после объявления таргета

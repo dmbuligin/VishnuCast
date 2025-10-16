@@ -1,7 +1,13 @@
 #include <jni.h>
 #include <android/log.h>
+#include <unordered_map>
+#include <mutex>
+
 #include "PlayerSendEngine.h"
 #include "NativePlayerSource.h"
+#include "NativePlayerSourceWebRtc.h"
+
+#include "api/peer_connection_interface.h" // webrtc::PeerConnectionFactoryInterface
 
 #define LOG_TAG "VishnuJNI"
 #define ALOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -14,28 +20,32 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void*) {
     return JNI_VERSION_1_6;
 }
 
-// ========= СТАРЫЙ ДВИЖОК (как было, jobject-подписи оставляем) =========
+// ==== Глобальная карта: NativePlayerSource* -> NativePlayerSourceWebRtc* ====
+static std::unordered_map<NativePlayerSource*, rtc::scoped_refptr<NativePlayerSourceWebRtc>> g_srcMap;
+static std::mutex g_mapMtx;
+
+// ==== Старый движок (оставляем без изменений) ====
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_buligin_vishnucast_player_jni_PlayerJni_createEngine(JNIEnv*, jobject) {
+Java_com_buligin_vishnucast_player_1jni_PlayerJni_createEngine(JNIEnv*, jobject) {
     auto* eng = new PlayerSendEngine();
     return reinterpret_cast<jlong>(eng);
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_buligin_vishnucast_player_jni_PlayerJni_destroyEngine(JNIEnv*, jobject, jlong ptr) {
+Java_com_buligin_vishnucast_player_1jni_PlayerJni_destroyEngine(JNIEnv*, jobject, jlong ptr) {
     auto* eng = reinterpret_cast<PlayerSendEngine*>(ptr);
     delete eng;
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_buligin_vishnucast_player_jni_PlayerJni_setMuted(JNIEnv*, jobject, jlong ptr, jboolean muted) {
+Java_com_buligin_vishnucast_player_1jni_PlayerJni_setMuted(JNIEnv*, jobject, jlong ptr, jboolean muted) {
     auto* eng = reinterpret_cast<PlayerSendEngine*>(ptr);
     if (!eng) return;
     eng->setMuted(muted == JNI_TRUE);
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_buligin_vishnucast_player_jni_PlayerJni_pushPcm48kMono(JNIEnv* env, jobject, jlong ptr, jshortArray pcm, jint samples) {
+Java_com_buligin_vishnucast_player_1jni_PlayerJni_pushPcm48kMono(JNIEnv* env, jobject, jlong ptr, jshortArray pcm, jint samples) {
     auto* eng = reinterpret_cast<PlayerSendEngine*>(ptr);
     if (!eng || !pcm) return;
 
@@ -47,31 +57,36 @@ Java_com_buligin_vishnucast_player_jni_PlayerJni_pushPcm48kMono(JNIEnv* env, job
     env->ReleaseShortArrayElements(pcm, data, JNI_ABORT);
 }
 
-// ===================== НОВЫЙ НАТИВНЫЙ ИСТОЧНИК =====================
+// ==== Новый нативный буфер-источник PCM ====
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_buligin_vishnucast_player_jni_PlayerJni_createSource(JNIEnv*, jobject) {
+Java_com_buligin_vishnucast_player_1jni_PlayerJni_createSource(JNIEnv*, jobject) {
     auto* src = new NativePlayerSource(48000, 1);
     ALOGD("NativePlayerSource created %p", src);
     return reinterpret_cast<jlong>(src);
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_buligin_vishnucast_player_jni_PlayerJni_destroySource(JNIEnv*, jobject, jlong ptr) {
+Java_com_buligin_vishnucast_player_1jni_PlayerJni_destroySource(JNIEnv*, jobject, jlong ptr) {
     auto* src = reinterpret_cast<NativePlayerSource*>(ptr);
     if (!src) return;
+
+    // Удаляем обёртку из карты, если была
+    {
+        std::lock_guard<std::mutex> lk(g_mapMtx);
+        g_srcMap.erase(src);
+    }
+
     delete src;
     ALOGD("NativePlayerSource destroyed %p", src);
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_buligin_vishnucast_player_jni_PlayerJni_sourceSetMuted(JNIEnv*, jobject, jlong ptr, jboolean muted) {
-    auto* src = reinterpret_cast<NativePlayerSource*>(ptr);
-    if (!src) return;
-    src->setMuted(muted == JNI_TRUE);
+Java_com_buligin_vishnucast_player_1jni_PlayerJni_sourceSetMuted(JNIEnv*, jobject, jlong /*ptr*/, jboolean /*muted*/) {
+    // Пока mute не используем в C++, логика mute остается на уровне WebRtcCore/enc.active
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_buligin_vishnucast_player_jni_PlayerJni_sourcePushPcm48kMono(JNIEnv* env, jobject, jlong ptr, jshortArray pcm, jint samples) {
+Java_com_buligin_vishnucast_player_1jni_PlayerJni_sourcePushPcm48kMono(JNIEnv* env, jobject, jlong ptr, jshortArray pcm, jint samples) {
     auto* src = reinterpret_cast<NativePlayerSource*>(ptr);
     if (!src || !pcm) return;
 
@@ -79,6 +94,57 @@ Java_com_buligin_vishnucast_player_jni_PlayerJni_sourcePushPcm48kMono(JNIEnv* en
     jshort* data = env->GetShortArrayElements(pcm, &isCopy);
     if (!data) return;
 
+    // Сохраняем последний кадр в буфер-источник (на будущее)
     src->pushPcm48kMono(reinterpret_cast<int16_t*>(data), samples);
+
+    // Если есть обёртка WebRTC — пушим в sinks, чтобы реальное аудио дошло в PC
+    {
+        std::lock_guard<std::mutex> lk(g_mapMtx);
+        auto it = g_srcMap.find(src);
+        if (it != g_srcMap.end() && it->second) {
+            it->second->Push10ms(reinterpret_cast<int16_t*>(data), samples);
+        }
+    }
+
     env->ReleaseShortArrayElements(pcm, data, JNI_ABORT);
+}
+
+// ==== Создание WebRTC-трека из нашего источника ====
+// ВНИМАНИЕ: принимаем Java-объект PeerConnectionFactory и вынимаем private long nativeFactory.
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_buligin_vishnucast_player_1jni_PlayerJni_createWebRtcPlayerTrack(
+        JNIEnv* env, jobject /*thiz*/, jobject jFactory, jlong nativeSrcPtr) {
+
+    if (!jFactory || nativeSrcPtr == 0) {
+        ALOGE("createWebRtcPlayerTrack: null args");
+        return 0;
+    }
+
+    // Достаём private long nativeFactory из PeerConnectionFactory
+    jclass cls = env->GetObjectClass(jFactory);
+    if (!cls) { ALOGE("createWebRtcPlayerTrack: no class"); return 0; }
+
+    jfieldID fid = env->GetFieldID(cls, "nativeFactory", "J");
+    if (!fid) { ALOGE("createWebRtcPlayerTrack: field nativeFactory not found"); return 0; }
+
+    jlong nativeFactoryPtr = env->GetLongField(jFactory, fid);
+    if (!nativeFactoryPtr) { ALOGE("createWebRtcPlayerTrack: nativeFactory is 0"); return 0; }
+
+    auto* factory = reinterpret_cast<webrtc::PeerConnectionFactoryInterface*>(nativeFactoryPtr);
+    auto* src     = reinterpret_cast<NativePlayerSource*>(nativeSrcPtr);
+
+    // Создаем обёртку источника и кладём в карту
+    rtc::scoped_refptr<NativePlayerSourceWebRtc> nativeSrc =
+            new rtc::RefCountedObject<NativePlayerSourceWebRtc>(src);
+    {
+        std::lock_guard<std::mutex> lk(g_mapMtx);
+        g_srcMap[src] = nativeSrc;
+    }
+
+    // Создаём AudioTrack поверх нашего источника
+    rtc::scoped_refptr<webrtc::AudioTrackInterface> track =
+            factory->CreateAudioTrack("VC_PLAYER_NATIVE", nativeSrc);
+
+    ALOGD("createWebRtcPlayerTrack: created track=%p (factory=%p, src=%p)", track.get(), factory, src);
+    return reinterpret_cast<jlong>(track.release()); // владелец → Java org.webrtc.AudioTrack
 }

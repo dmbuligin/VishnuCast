@@ -23,6 +23,8 @@ import kotlin.math.sqrt
 import com.buligin.vishnucast.player.jni.PlayerJni
 import com.buligin.vishnucast.player.capture.PlayerSystemCaptureCompat
 import android.os.Build
+import org.webrtc.NativePeerConnectionFactory
+
 
 
 
@@ -121,9 +123,23 @@ class WebRtcCore(private val ctx: Context) {
             optional.add(MediaConstraints.KeyValuePair("googAutoGainControl2", "false"))
             optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "false"))
         }
+
         playerSource = factory.createAudioSource(playerConstraints)
-        playerTrack  = factory.createAudioTrack("VC_PLAYER_0", playerSource)
+
+        playerTrack = try {
+            val trackPtr = PlayerJni.createWebRtcPlayerTrack(factory, nativePlayerSrcHandle)
+            Log.d("VishnuRTC", "playerTrack (NATIVE) trackPtr=$trackPtr")
+            if (trackPtr != 0L) {
+                AudioTrack(trackPtr)
+            } else {
+                factory.createAudioTrack("VC_PLAYER_0", playerSource) // fallback
+            }
+        } catch (t: Throwable) {
+            Log.w("VishnuRTC", "createWebRtcPlayerTrack failed: ${t.message}")
+            factory.createAudioTrack("VC_PLAYER_0", playerSource)
+        }
         playerTrack.setEnabled(true)
+
 
         // — NATIVE player source (создаём один раз и связываем с системным захватчиком)
         try {
