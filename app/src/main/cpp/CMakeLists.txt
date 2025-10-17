@@ -15,6 +15,7 @@ set(WEBRTC_SDK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/webrtc-137.7151.03)
 # Заголовки M137 (branch-heads/7151): app/src/main/cpp/third_party/webrtc-headers-137.7151
 set(WEBRTC_HEADERS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/webrtc-headers-137.7151)
 
+
 # Проверим, что заголовки существуют (хватит наличия api/)
 if (NOT EXISTS "${WEBRTC_HEADERS_DIR}/api")
     message(FATAL_ERROR "WebRTC headers not found at ${WEBRTC_HEADERS_DIR} (expected subdir 'api').")
@@ -34,7 +35,19 @@ add_library(
         PlayerSendEngine.cpp
         PlayerJniBridge.cpp
         NativePlayerSourceWebRtc.cpp
+        webrtc_keyfunc_shim.cpp
 )
+
+# Совместимость для старых аннотаций в WebRTC M137:
+# Если в подключенном Abseil нет absl_nullable/absl_nonnull — объявим их пустыми.
+target_compile_definitions(vishnuplayer PRIVATE
+        WEBRTC_ANDROID=1
+        WEBRTC_POSIX=1
+        absl_nullable=
+        absl_nonnull=
+)
+
+
 
 # Подключаем include после объявления таргета
 target_include_directories(vishnuplayer PRIVATE

@@ -8,6 +8,8 @@
 #include "NativePlayerSourceWebRtc.h"
 
 #include "api/peer_connection_interface.h" // webrtc::PeerConnectionFactoryInterface
+#include "api/scoped_refptr.h"             // webrtc::scoped_refptr
+#include "rtc_base/ref_counted_object.h"   // webrtc::RefCountedObject
 
 #define LOG_TAG "VishnuJNI"
 #define ALOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
@@ -21,7 +23,7 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void*) {
 }
 
 // ==== Глобальная карта: NativePlayerSource* -> NativePlayerSourceWebRtc* ====
-static std::unordered_map<NativePlayerSource*, rtc::scoped_refptr<NativePlayerSourceWebRtc>> g_srcMap;
+static std::unordered_map<NativePlayerSource*, webrtc::scoped_refptr<NativePlayerSourceWebRtc>> g_srcMap;
 static std::mutex g_mapMtx;
 
 // ==== Старый движок (оставляем без изменений) ====
@@ -70,7 +72,6 @@ Java_com_buligin_vishnucast_player_1jni_PlayerJni_destroySource(JNIEnv*, jobject
     auto* src = reinterpret_cast<NativePlayerSource*>(ptr);
     if (!src) return;
 
-    // Удаляем обёртку из карты, если была
     {
         std::lock_guard<std::mutex> lk(g_mapMtx);
         g_srcMap.erase(src);
@@ -82,7 +83,7 @@ Java_com_buligin_vishnucast_player_1jni_PlayerJni_destroySource(JNIEnv*, jobject
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_buligin_vishnucast_player_1jni_PlayerJni_sourceSetMuted(JNIEnv*, jobject, jlong /*ptr*/, jboolean /*muted*/) {
-    // Пока mute не используем в C++, логика mute остается на уровне WebRtcCore/enc.active
+    // Mute в C++ не используем; логика на уровне WebRtcCore/enc.active
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -94,10 +95,8 @@ Java_com_buligin_vishnucast_player_1jni_PlayerJni_sourcePushPcm48kMono(JNIEnv* e
     jshort* data = env->GetShortArrayElements(pcm, &isCopy);
     if (!data) return;
 
-    // Сохраняем последний кадр в буфер-источник (на будущее)
     src->pushPcm48kMono(reinterpret_cast<int16_t*>(data), samples);
 
-    // Если есть обёртка WebRTC — пушим в sinks, чтобы реальное аудио дошло в PC
     {
         std::lock_guard<std::mutex> lk(g_mapMtx);
         auto it = g_srcMap.find(src);
@@ -110,7 +109,7 @@ Java_com_buligin_vishnucast_player_1jni_PlayerJni_sourcePushPcm48kMono(JNIEnv* e
 }
 
 // ==== Создание WebRTC-трека из нашего источника ====
-// ВНИМАНИЕ: принимаем Java-объект PeerConnectionFactory и вынимаем private long nativeFactory.
+// Принимаем Java-объект PeerConnectionFactory и извлекаем private long nativeFactory.
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_buligin_vishnucast_player_1jni_PlayerJni_createWebRtcPlayerTrack(
         JNIEnv* env, jobject /*thiz*/, jobject jFactory, jlong nativeSrcPtr) {
@@ -120,7 +119,6 @@ Java_com_buligin_vishnucast_player_1jni_PlayerJni_createWebRtcPlayerTrack(
         return 0;
     }
 
-    // Достаём private long nativeFactory из PeerConnectionFactory
     jclass cls = env->GetObjectClass(jFactory);
     if (!cls) { ALOGE("createWebRtcPlayerTrack: no class"); return 0; }
 
@@ -133,17 +131,16 @@ Java_com_buligin_vishnucast_player_1jni_PlayerJni_createWebRtcPlayerTrack(
     auto* factory = reinterpret_cast<webrtc::PeerConnectionFactoryInterface*>(nativeFactoryPtr);
     auto* src     = reinterpret_cast<NativePlayerSource*>(nativeSrcPtr);
 
-    // Создаем обёртку источника и кладём в карту
-    rtc::scoped_refptr<NativePlayerSourceWebRtc> nativeSrc =
-            new rtc::RefCountedObject<NativePlayerSourceWebRtc>(src);
+    webrtc::scoped_refptr<NativePlayerSourceWebRtc> nativeSrc =
+            webrtc::make_ref_counted<NativePlayerSourceWebRtc>(src);
+
     {
         std::lock_guard<std::mutex> lk(g_mapMtx);
         g_srcMap[src] = nativeSrc;
     }
 
-    // Создаём AudioTrack поверх нашего источника
-    rtc::scoped_refptr<webrtc::AudioTrackInterface> track =
-            factory->CreateAudioTrack("VC_PLAYER_NATIVE", nativeSrc);
+    webrtc::scoped_refptr<webrtc::AudioTrackInterface> track =
+            factory->CreateAudioTrack("VC_PLAYER_NATIVE", nativeSrc.get());
 
     ALOGD("createWebRtcPlayerTrack: created track=%p (factory=%p, src=%p)", track.get(), factory, src);
     return reinterpret_cast<jlong>(track.release()); // владелец → Java org.webrtc.AudioTrack
