@@ -13,16 +13,16 @@ class VishnuServer(
     override fun openWebSocket(handshake: NanoHTTPD.IHTTPSession): WebSocket {
         // handshake ненулевой — NanoWSD сам валидирует
         Logger.d("VishnuWS", "openWebSocket on ${handshake.uri}")
-        android.util.Log.d("VishnuMix", "VishnuServer.openWebSocket: new socket")
+        android.util.Log.d("VishnuMix", "VishnuServer.openWebSocket: new socket uri=${handshake.uri}")
         return SignalingSocket(appContext, handshake)
     }
 
     override fun serve(session: NanoHTTPD.IHTTPSession): Response {
 
-        // Разруливаем WebSocket-апгрейд только на /ws
+        // Разруливаем WebSocket-апгрейд на /ws (MIC) и /ws_player (PLAYER)
         @Suppress("DEPRECATION")
-        if (session.uri == "/ws" && isWebsocketRequested(session)) {
-            Logger.d("VishnuWS", "Upgrading to WebSocket on /ws")
+        if ((session.uri == "/ws" || session.uri == "/ws_player") && isWebsocketRequested(session)) {
+            Logger.d("VishnuWS", "Upgrading to WebSocket on ${session.uri}")
             return super.serve(session)
         }
 
@@ -32,8 +32,7 @@ class VishnuServer(
             "/client.js"       -> asset("client.js", "application/javascript; charset=utf-8")
             "/apple-touch-icon.png" -> asset("apple-touch-icon.png", "image/png")
             "/favicon.png" -> asset("favicon.png", "image/png")
-
-            else               -> newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Not found")
+            else -> newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Not found")
         }
     }
 

@@ -25,18 +25,15 @@ object WebRtcCoreHolder {
         }
     }
 
+    fun peek(): WebRtcCore? = instance
+
     fun closeAndClear() = synchronized(this) {
         val inst = instance
         if (inst != null) {
-            // Без прямой ссылки на WebRtcCore.close() — чтобы не ловить Unresolved reference
             try {
-                // Порядок важен: сперва пытаемся вызвать close(), если это наш WebRtcCore
                 inst.javaClass.getMethod("close").invoke(inst)
             } catch (_: Throwable) {
-                try {
-                    // Для WebRTC-объектов (PeerConnection/Factory/Source/Track) корректно dispose()
-                    inst.javaClass.getMethod("dispose").invoke(inst)
-                } catch (_: Throwable) { /* no-op */ }
+                try { inst.javaClass.getMethod("dispose").invoke(inst) } catch (_: Throwable) { /* no-op */ }
             }
         }
         instance = null
@@ -58,13 +55,10 @@ class SignalingSocket(
 ) : NanoWSD.WebSocket(handshake) {
 
     companion object {
-
         private val sockets = java.util.concurrent.CopyOnWriteArraySet<SignalingSocket>()
-
         private val wsExec = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
             Thread(r, "vc-ws-broadcast").apply { isDaemon = true }
         }
-
 
         fun broadcastJson(obj: org.json.JSONObject) {
             val text = obj.toString()
@@ -80,11 +74,8 @@ class SignalingSocket(
             }
         }
 
-
         fun broadcastMix(alpha: Float, micMuted: Boolean) {
-
-            android.util.Log.d("VishnuMix", "WS broadcastMix alpha=" + alpha + " micMuted=" + micMuted + " sockets=" + sockets.size)
-
+            android.util.Log.d("VishnuMix", "WS broadcastMix alpha=$alpha micMuted=$micMuted sockets=${sockets.size}")
             val msg = org.json.JSONObject()
                 .put("type", "mix")
                 .put("alpha", alpha.coerceIn(0f, 1f))
@@ -93,8 +84,14 @@ class SignalingSocket(
         }
     }
 
-
     private val webrtc = WebRtcCoreHolder.get(ctx)
+
+    // какой тип PC нужен этому сокету: /ws → MIC, /ws_player → PLAYER
+    private val kind: WebRtcCore.PcKind = when (handshake.uri) {
+        "/ws_player" -> WebRtcCore.PcKind.PLAYER
+        else -> WebRtcCore.PcKind.MIC
+    }
+
     private var pc: org.webrtc.PeerConnection? = null
 
     // учёт состояния «засчитан в счётчик»
@@ -103,7 +100,7 @@ class SignalingSocket(
 
     override fun onOpen() {
         sockets.add(this)
-        android.util.Log.d("VishnuMix", "WS onOpen sockets=" + sockets.size)
+        android.util.Log.d("VishnuMix", "WS onOpen uri=${handshakeRequest.uri} sockets=${sockets.size} kind=$kind")
 
         // Тестовое сообщение клиенту сразу после подключения
         try {
@@ -118,7 +115,6 @@ class SignalingSocket(
             android.util.Log.e("VishnuMix", "WS onOpen test mix FAIL: " + t.message, t)
         }
     }
-
 
     override fun onPong(pong: NanoWSD.WebSocketFrame?) {}
 
@@ -181,7 +177,7 @@ class SignalingSocket(
 
     override fun onClose(code: NanoWSD.WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) {
         sockets.remove(this)
-          android.util.Log.d("VishnuMix", "WS onClose sockets=" + sockets.size)
+        android.util.Log.d("VishnuMix", "WS onClose uri=${handshakeRequest.uri} sockets=${sockets.size} kind=$kind")
 
         stopPolling()
         if (counted.compareAndSet(true, false)) {
@@ -194,7 +190,8 @@ class SignalingSocket(
     override fun onException(exception: java.io.IOException?) {}
 
     private fun handleOffer(sdp: String) {
-        pc = webrtc.createPeerConnection { cand ->
+        // создаём PC нужного типа (MIC или PLAYER)
+        pc = webrtc.createPeerConnection(kind) { cand ->
             val payload = JSONObject()
                 .put("sdpMid", cand.sdpMid)
                 .put("sdpMLineIndex", cand.sdpMLineIndex)
@@ -214,26 +211,19 @@ class SignalingSocket(
         pcLocal.setRemoteDescription(object : SdpObserver {
             override fun onSetSuccess() {
                 pcLocal.createAnswer(object : SdpObserver {
-                    // createAnswer → onCreateSuccess
                     override fun onCreateSuccess(desc: SessionDescription) {
-                        // SDP-мунжинг: opus-only + разные профили для MIC (#0) и PLAYER (#1)
+                        // SDP-мунжинг под конкретный PC
                         val mungedSdp = try {
-                            mungeOpusAnswer(desc.description)
+                            mungeOpusAnswerForKind(desc.description, kind)
                         } catch (_: Throwable) {
                             desc.description // не валим сессию, если что-то пошло не так
                         }
                         val munged = SessionDescription(desc.type, mungedSdp)
 
-                        // setLocalDescription уже с подменённым SDP
                         pcLocal.setLocalDescription(object : SdpObserver {
                             override fun onSetSuccess() {
                                 try {
-                                    send(
-                                        JSONObject()
-                                            .put("type", "answer")
-                                            .put("sdp", mungedSdp)
-                                            .toString()
-                                    )
+                                    send(JSONObject().put("type", "answer").put("sdp", mungedSdp).toString())
                                 } catch (_: Throwable) {}
                             }
                             override fun onSetFailure(p0: String?) {
@@ -285,11 +275,10 @@ class SignalingSocket(
         pollTimer = null
     }
 
-    // ====== SDP MUNGE ======
-    // Принудительный Opus-профиль на две m=audio:
-    //  - m=audio #0 (MIC): 64 kbps, ptime=20, DTX on, CBR, FEC off
-    //  - m=audio #1 (PLAYER): 128 kbps, ptime=40, DTX off, CBR, FEC off
-    private fun mungeOpusAnswer(sdpIn: String): String {
+    // ====== SDP MUNGE (индивидуально для MIC/PLAYER) ======
+    // MIC: 64 kbps, ptime=10, DTX off, CBR, FEC off
+    // PLAYER: 128 kbps, ptime=40, DTX off, CBR, FEC off, stereo=1
+    private fun mungeOpusAnswerForKind(sdpIn: String, kind: WebRtcCore.PcKind): String {
         val sdp = sdpIn.replace("\r\n", "\n")
         val lines = sdp.split("\n")
 
@@ -314,7 +303,7 @@ class SignalingSocket(
         if (!seenMedia) return sdpIn
         if (cur.isNotEmpty()) sections.add(cur)
 
-        fun processAudioSection(body: String, index: Int): String {
+        fun processAudioSection(body: String, isPlayer: Boolean): String {
             val ls = body.trim('\n').split("\n").toMutableList()
             var mLineIdx = -1
             var opusPt: String? = null
@@ -356,7 +345,7 @@ class SignalingSocket(
             for (i in toRemoveIdx.sortedDescending()) ls.removeAt(i)
 
             // fmtp для opus
-            val wantFmtp = if (index == 0) {
+            val wantFmtp = if (!isPlayer) {
                 // MIC
                 listOf(
                     "stereo=0",
@@ -398,8 +387,8 @@ class SignalingSocket(
             }
 
             // ptime / maxptime секционные
-            val wantPtime = if (index == 0) 10 else 40
-            val wantMaxPtime = if (index == 0) 20 else 60
+            val wantPtime = if (!isPlayer) 10 else 40
+            val wantMaxPtime = if (!isPlayer) 20 else 60
 
             fun upsertAttr(name: String, value: Int) {
                 var set = false
@@ -420,12 +409,11 @@ class SignalingSocket(
 
         val out = StringBuilder()
         out.append(headers.toString())
-        var audioIdx = 0
+        val isPlayer = (kind == WebRtcCore.PcKind.PLAYER)
         for (sec in sections) {
             val body = sec.toString()
             if (body.startsWith("m=audio ")) {
-                out.append(processAudioSection(body, audioIdx))
-                audioIdx += 1
+                out.append(processAudioSection(body, isPlayer))
             } else {
                 out.append(body)
             }

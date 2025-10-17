@@ -2,6 +2,7 @@
 #include "NativePlayerSource.h"
 #include <android/log.h>
 #include <algorithm>
+#include "absl/types/optional.h" // уже добавляли для OnData
 
 #define LOG_TAG "VishnuJNI"
 #define ALOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
@@ -14,9 +15,19 @@ NativePlayerSourceWebRtc::NativePlayerSourceWebRtc(NativePlayerSource* src)
 }
 
 NativePlayerSourceWebRtc::~NativePlayerSourceWebRtc() {
-    ALOGD("NativePlayerSourceWebRtс dtor %p", this);
+    ALOGD("NativePlayerSourceWebRtc dtor %p", this);
 }
 
+// === MediaSourceInterface ===
+webrtc::MediaSourceInterface::SourceState NativePlayerSourceWebRtc::state() const {
+    return state_; // kLive
+}
+
+bool NativePlayerSourceWebRtc::remote() const {
+    return remote_; // false (локальный)
+}
+
+// === AudioSourceInterface ===
 void NativePlayerSourceWebRtc::AddSink(AudioTrackSinkInterface* sink) {
     webrtc::MutexLock lock(&sinks_mutex_);
     sinks_.push_back(sink);
@@ -32,12 +43,11 @@ void NativePlayerSourceWebRtc::Push10ms(const int16_t* data, int samples) {
     webrtc::MutexLock lock(&sinks_mutex_);
     for (auto* s : sinks_) {
         s->OnData(
-                data,
-                samples,                   // 480
-                48000,                     // sample rate
-                1,                         // channels mono
-                samples * sizeof(int16_t), // bytes per 10ms
-                AudioTrackSinkInterface::kInt16,
-                /*absolute_capture_timestamp_ms=*/0);
+                /*audio_data=*/data,
+                /*bits_per_sample=*/16,
+                /*sample_rate=*/48000,
+                /*number_of_channels=*/1,
+                /*number_of_frames=*/static_cast<size_t>(samples),
+                /*absolute_capture_timestamp_ms=*/absl::nullopt);
     }
 }
