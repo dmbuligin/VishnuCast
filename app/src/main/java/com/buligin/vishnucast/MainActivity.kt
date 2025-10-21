@@ -6,7 +6,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.core.os.LocaleListCompat
-import java.util.EnumMap
+
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
@@ -35,15 +35,16 @@ import androidx.core.widget.TextViewCompat
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
+
+
+
 import android.content.Context
 import android.view.View
-import android.net.wifi.WifiManager
+
 import android.net.Uri
+import com.buligin.vishnucast.QrCodeGenerator
+import com.buligin.vishnucast.NetUtils
+import com.buligin.vishnucast.NetUtils.NetKind
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import android.annotation.SuppressLint
 import android.view.HapticFeedbackConstants
@@ -444,22 +445,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun getLocalIpAddress(): String? = NetUtils.getLocalIpv4(this)
 
-    private fun generateQrAsync(text: String, onReady: (Bitmap) -> Unit) {
-        thread {
-            try {
-                val size = 512
-                val hints = EnumMap<EncodeHintType, Any>(EncodeHintType::class.java).apply {
-                    put(EncodeHintType.MARGIN, 1)
-                }
-                val bitMatrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, size, size, hints)
-                val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-                for (x in 0 until size) for (y in 0 until size) {
-                    bmp.setPixel(x, y, if (bitMatrix[x, y]) Color.BLACK else Color.WHITE)
-                }
-                runOnUiThread { onReady(bmp) }
-            } catch (_: Throwable) { }
-        }
-    }
+
 
     private fun currentLangCode(): String {
         AppCompatDelegate.getApplicationLocales()?.toLanguageTags()?.let { tags ->
@@ -504,56 +490,17 @@ class MainActivity : AppCompatActivity() {
 
         // QR
         if (ip != null) {
-            generateQrAsync(url) { bmp -> ivQr.setImageBitmap(bmp) }
+            ivQr.setImageBitmap(QrCodeGenerator.generateQrCode(url, 512))
         } else {
             ivQr.setImageDrawable(null)
         }
     }
 
-    private enum class NetKind { AP, WIFI, ETH, OTHER }
 
-    private fun detectNetKind(ip: String?): NetKind {
-        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val active = cm.activeNetwork
-        val caps = cm.getNetworkCapabilities(active)
 
-        if (caps != null) {
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return NetKind.ETH
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))     return NetKind.WIFI
-        }
 
-        if (ip != null) {
-            try {
-                val target = java.net.InetAddress.getByName(ip)
-                val ifs = java.net.NetworkInterface.getNetworkInterfaces()
-                while (ifs.hasMoreElements()) {
-                    val ni = ifs.nextElement()
-                    val addrs = ni.inetAddresses
-                    while (addrs.hasMoreElements()) {
-                        val a = addrs.nextElement()
-                        if (a.hostAddress == target.hostAddress) {
-                            val n = ni.name.lowercase()
-                            if (n.startsWith("ap")) return NetKind.AP
-                            if (n.startsWith("wlan")) {
-                                val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-                                return if (!wm.isWifiEnabled) NetKind.AP else NetKind.WIFI
-                            }
-                            if (n.startsWith("eth")) return NetKind.ETH
-                            return NetKind.OTHER
-                        }
-                    }
-                }
-            } catch (_: Throwable) { /* no-op */ }
-        }
 
-        if (ip != null && isPrivateIpv4(ip) && active == null) return NetKind.AP
-        return NetKind.OTHER
-    }
 
-    private fun isPrivateIpv4(ip: String): Boolean =
-        ip.startsWith("10.") ||
-            ip.startsWith("192.168.") ||
-            (ip.startsWith("172.") && ip.substringAfter("172.").substringBefore(".").toIntOrNull() in 16..31)
 
     private fun getServerPort(): Int {
         val sp = getSharedPreferences("vishnucast", Context.MODE_PRIVATE)
