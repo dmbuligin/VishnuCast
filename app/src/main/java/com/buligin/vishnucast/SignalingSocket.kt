@@ -121,7 +121,10 @@ class SignalingSocket(
     override fun onMessage(message: NanoWSD.WebSocketFrame) {
         try {
             val text = message.textPayload ?: return
+            android.util.Log.d("VishnuWS", "recv uri=${handshakeRequest.uri} bytes=${text.length}")
             val obj = try { JSONObject(text) } catch (_: Throwable) { null }
+            val _type = obj?.optString("type") ?: ""
+            android.util.Log.d("VishnuWS", "msg type=$_type uri=${handshakeRequest.uri}")
             if (obj == null) return
 
             // --- keep-alive от клиента ---
@@ -164,6 +167,7 @@ class SignalingSocket(
             when (obj.optString("type", "")) {
                 "offer" -> {
                     try {
+                        android.util.Log.d("VishnuWS", "offer received, len=" + obj.optString("sdp","").length + " kind=" + kind)
                         send(JSONObject().put("type", "ack").put("stage", "offer-received").toString())
                     } catch (_: Throwable) {}
                     handleOffer(obj.getString("sdp"))
@@ -183,7 +187,7 @@ class SignalingSocket(
         if (counted.compareAndSet(true, false)) {
             ClientCounterStable.dec()
         }
-        try { pc?.dispose() } catch (_: Throwable) {}
+        // PC дальше корректно будет закрыт в ядре; локальную ссылку обнуляем
         pc = null
     }
 
@@ -224,6 +228,7 @@ class SignalingSocket(
                             override fun onSetSuccess() {
                                 try {
                                     send(JSONObject().put("type", "answer").put("sdp", mungedSdp).toString())
+                                    android.util.Log.d("VishnuWS", "answer sent kind=$kind len=${mungedSdp.length}")
                                 } catch (_: Throwable) {}
                             }
                             override fun onSetFailure(p0: String?) {
@@ -256,13 +261,16 @@ class SignalingSocket(
                 override fun run() {
                     val cur = pc ?: return
                     val st = try { cur.iceConnectionState() } catch (_: Throwable) { null }
-                    if (st == org.webrtc.PeerConnection.IceConnectionState.CONNECTED) {
+                    if (st == org.webrtc.PeerConnection.IceConnectionState.CONNECTED
+                        || st == org.webrtc.PeerConnection.IceConnectionState.COMPLETED) {
                         if (counted.compareAndSet(false, true)) {
                             ClientCounterStable.inc()
                         }
                         stopPolling()
                     } else if (st == org.webrtc.PeerConnection.IceConnectionState.FAILED
-                        || st == org.webrtc.PeerConnection.IceConnectionState.CLOSED) {
+                        || st == org.webrtc.PeerConnection.IceConnectionState.CLOSED
+                        || st == org.webrtc.PeerConnection.IceConnectionState.DISCONNECTED) {
+                        android.util.Log.d("VishnuWS", "ICE state=$st kind=$kind (stop polling)")
                         stopPolling()
                     }
                 }
@@ -317,20 +325,16 @@ class SignalingSocket(
             }
             if (mLineIdx < 0 || opusPt == null) return body
 
-            // Оставляем в m-line только opus PT
+            // Оставляем в m-line только opus PT (без дублей) — строгое восстановление
             run {
                 val m = ls[mLineIdx]
-                val parts = m.split(" ").toMutableList()
-                if (parts.size >= 4) {
-                    val keep = mutableListOf<String>()
-                    keep.add(parts[0]) // m=audio
-                    keep.add(parts[1]) // <port>
-                    keep.add(parts[2]) // RTP/SAVPF
-                    keep.add(parts[3]) // proto
-                    keep.add(opusPt!!)
-                    ls[mLineIdx] = keep.joinToString(" ")
-                }
+                val parts = m.split(" ").filter { it.isNotEmpty() }
+                val proto = if (parts.size >= 3) parts[2] else "UDP/TLS/RTP/SAVPF"
+                val port = if (parts.size >= 2) parts[1] else "9"
+                ls[mLineIdx] = "m=audio $port $proto $opusPt"
             }
+
+
 
             // Сносим rtpmap/fmtp/rtcp-fb для всех PT != opus
             val allowed = setOf(opusPt!!)
@@ -404,7 +408,12 @@ class SignalingSocket(
             upsertAttr("ptime", wantPtime)
             upsertAttr("maxptime", wantMaxPtime)
 
-            return ls.joinToString("\n", postfix = "\n")
+            val out = ls.joinToString("\n", postfix = "\n")
+            // На всякий случай: прибьём возможный дубль PT в m=audio ещё раз регуляркой
+            return out.replace(Regex("""^m=audio\s+(\d+)\s+(\S+)\s+(\d+)(?:\s+\3)+\s*$""", RegexOption.MULTILINE)) {
+                val port = it.groupValues[1]; val proto = it.groupValues[2]; val pt = it.groupValues[3]
+                "m=audio $port $proto $pt"
+            }
         }
 
         val out = StringBuilder()
