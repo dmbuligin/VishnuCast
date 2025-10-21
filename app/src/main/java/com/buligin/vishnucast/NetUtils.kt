@@ -85,3 +85,45 @@ object NetUtils {
         }
     }
 }
+
+
+    enum class NetKind { AP, WIFI, ETH, OTHER }
+
+    fun detectNetKind(ctx: Context, ip: String?): NetKind {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val active = cm.activeNetwork
+        val caps = cm.getNetworkCapabilities(active)
+
+        if (caps != null) {
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return NetKind.ETH
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))     return NetKind.WIFI
+        }
+
+        if (ip != null) {
+            try {
+                val target = java.net.InetAddress.getByName(ip)
+                val ifs = java.net.NetworkInterface.getNetworkInterfaces()
+                while (ifs.hasMoreElements()) {
+                    val ni = ifs.nextElement()
+                    val addrs = ni.inetAddresses
+                    while (addrs.hasMoreElements()) {
+                        val a = addrs.nextElement()
+                        if (a.hostAddress == target.hostAddress) {
+                            val n = ni.name.lowercase()
+                            if (n.startsWith("ap")) return NetKind.AP
+                            if (n.startsWith("wlan")) {
+                                val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                                return if (!wm.isWifiEnabled) NetKind.AP else NetKind.WIFI
+                            }
+                            if (n.startsWith("eth")) return NetKind.ETH
+                            return NetKind.OTHER
+                        }
+                    }
+                }
+            } catch (_: Throwable) { /* no-op */ }
+        }
+
+        if (ip != null && isPrivateIpv4(ip) && active == null) return NetKind.AP
+        return NetKind.OTHER
+    }
+
