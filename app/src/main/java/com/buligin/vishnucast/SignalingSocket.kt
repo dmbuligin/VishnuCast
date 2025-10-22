@@ -11,7 +11,6 @@ import java.util.TimerTask
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-
 /** Глобальный холдер единственного WebRtcCore на процесс */
 object WebRtcCoreHolder {
     @Volatile private var instance: WebRtcCore? = null
@@ -29,15 +28,8 @@ object WebRtcCoreHolder {
     fun closeAndClear() = synchronized(this) {
         val inst = instance
         if (inst != null) {
-            // Без прямой ссылки на WebRtcCore.close() — чтобы не ловить Unresolved reference
-            try {
-                // Порядок важен: сперва пытаемся вызвать close(), если это наш WebRtcCore
-                inst.javaClass.getMethod("close").invoke(inst)
-            } catch (_: Throwable) {
-                try {
-                    // Для WebRTC-объектов (PeerConnection/Factory/Source/Track) корректно dispose()
-                    inst.javaClass.getMethod("dispose").invoke(inst)
-                } catch (_: Throwable) { /* no-op */ }
+            try { inst.javaClass.getMethod("close").invoke(inst) } catch (_: Throwable) {
+                try { inst.javaClass.getMethod("dispose").invoke(inst) } catch (_: Throwable) {}
             }
         }
         instance = null
@@ -72,8 +64,7 @@ class SignalingSocket(
     override fun onMessage(message: NanoWSD.WebSocketFrame) {
         try {
             val text = message.textPayload ?: return
-            val obj = try { JSONObject(text) } catch (_: Throwable) { null }
-            if (obj == null) return
+            val obj = try { JSONObject(text) } catch (_: Throwable) { null } ?: return
 
             // --- keep-alive от клиента ---
             when (obj.optString("type", "")) {
@@ -114,9 +105,7 @@ class SignalingSocket(
             // --- SDP offer ---
             when (obj.optString("type", "")) {
                 "offer" -> {
-                    try {
-                        send(JSONObject().put("type", "ack").put("stage", "offer-received").toString())
-                    } catch (_: Throwable) {}
+                    try { send(JSONObject().put("type", "ack").put("stage", "offer-received").toString()) } catch (_: Throwable) {}
                     handleOffer(obj.getString("sdp"))
                 }
                 else -> { /* no-op */ }
@@ -137,65 +126,31 @@ class SignalingSocket(
 
     override fun onException(exception: java.io.IOException?) {}
 
-
-
-    private fun normalizeOpusOnlyAnswer(sdpIn: String): String {
-        // Нормализуем под один Opus-поток: m=audio ... 111, a=rtpmap/fmtp/rtcp-fb только для opus
+    // --- оставляем только уникальные payload type в строке m=audio; прочее не трогаем ---
+    private fun dedupMLinePayloads(sdpIn: String): String {
         val s = sdpIn.replace("\r\n", "\n")
-        val lines = s.lines()
-
-        // 1) Найдём PT для opus/48000/2
-        var opusPt: String? = null
-        for (l in lines) {
-            val m = Regex("""^a=rtpmap:(\d+)\s+opus/48000/2""").find(l)
-            if (m != null) { opusPt = m.groupValues[1]; break }
-        }
-        if (opusPt == null) return sdpIn // нет opus — ничего не меняем
-
-        // 2) Пересобираем SDP
-        val out = ArrayList<String>(lines.size)
-        var mAudioDone = false
-
-        for (l in lines) {
+        val lines = s.lines().toMutableList()
+        for (i in lines.indices) {
+            val l = lines[i]
             if (l.startsWith("m=audio ")) {
-                // m=audio <port> <proto> <opusPt>
-                val parts = l.split(" ").filter { it.isNotEmpty() }
-                val port = if (parts.size >= 2) parts[1] else "9"
-                val proto = if (parts.size >= 3) parts[2] else "UDP/TLS/RTP/SAVPF"
-                out.add("m=audio $port $proto $opusPt")
-                mAudioDone = true
-                continue
-            }
-
-            // a=rtpmap/fmtp/rtcp-fb — оставляем только для opus PT
-            val mm = Regex("""^a=(rtpmap|fmtp|rtcp-fb):(\d+)(.*)$""").find(l)
-            if (mm != null) {
-                val pt = mm.groupValues[2]
-                // rtpmap: оставляем только opus; остальные PT отбрасываем
-                if (l.startsWith("a=rtpmap:")) {
-                    if (l.contains("opus/48000/2")) out.add(l)
-                } else {
-                    if (pt == opusPt) out.add(l)
+                val parts = l.trim().split(Regex("\\s+"))
+                if (parts.size >= 4) {
+                    val prefix = parts.subList(0, 3) // ["m=audio", "<port>", "<proto>"]
+                    val payloads = linkedSetOf<String>() // порядок сохраняем, дубли убираем
+                    for (k in 3 until parts.size) {
+                        val p = parts[k]
+                        if (p.isNotEmpty()) payloads.add(p)
+                    }
+                    lines[i] = prefix.joinToString(" ") + " " + payloads.joinToString(" ")
                 }
-                continue
+                break
             }
-
-            // Остальные строки (ice, fingerprint, setup, extmap, msid и т.д.) — пропускаем как есть
-            out.add(l)
         }
-
-        // 3) На случай, если m=audio не попалась (крайний случай), ничего не ломаем
-        if (!mAudioDone) return sdpIn
-
-        // 4) Гарантируем CRLF и завершающий CRLF
-        return out.joinToString("\r\n", postfix = "\r\n")
+        return lines.joinToString("\r\n", postfix = "\r\n")
     }
 
-
-
-
-
     private fun handleOffer(sdp: String) {
+        // создаём PC и фиксируем ссылку
         pc = webrtc.createPeerConnection { cand ->
             val payload = JSONObject()
                 .put("sdpMid", cand.sdpMid)
@@ -215,29 +170,38 @@ class SignalingSocket(
         val remote = SessionDescription(SessionDescription.Type.OFFER, sdp)
         pcLocal.setRemoteDescription(object : SdpObserver {
             override fun onSetSuccess() {
+                // ВАЖНО: используем только "замороженную" ссылку pcLocal
                 pcLocal.createAnswer(object : SdpObserver {
-
                     override fun onCreateSuccess(desc: SessionDescription) {
-                        val munged = normalizeOpusOnlyAnswer(desc.description)
-                        val local = SessionDescription(desc.type, munged)
+                        val mungedSdp = try {
+                            dedupMLinePayloads(desc.description)
+                        } catch (t: Throwable) {
+                            android.util.Log.w("VishnuWS", "dedup m=audio failed: ${t.message}")
+                            desc.description
+                        }
+                        val local = SessionDescription(desc.type, mungedSdp)
 
-                        pcLocal.setLocalDescription(object : SdpObserver {
+                        val localPc = pcLocal // фиксируем ссылку для колбэка
+                        localPc.setLocalDescription(object : SdpObserver {
                             override fun onSetSuccess() {
                                 try {
-                                    send(org.json.JSONObject().put("type", "answer").put("sdp", munged).toString())
-                                    android.util.Log.d("VishnuWS", "answer sent len=${munged.length}")
-                                } catch (_: Throwable) {}
+                                    val json = JSONObject()
+                                        .put("type", "answer")
+                                        .put("sdp", mungedSdp)
+                                    send(json.toString())
+                                    android.util.Log.d("VishnuWS", "answer sent len=${mungedSdp.length}")
+                                } catch (_: Throwable) { /* ignore */ }
                             }
-                            override fun onSetFailure(p0: String?) {}
+                            override fun onSetFailure(p0: String?) {
+                                android.util.Log.e("VishnuWS", "setLocalDescription failed: $p0")
+                            }
                             override fun onCreateSuccess(p0: SessionDescription?) {}
                             override fun onCreateFailure(p0: String?) {}
                         }, local)
                     }
 
-
-
                     override fun onCreateFailure(p0: String?) {
-                        try { send(JSONObject().put("type", "error").put("message", "createAnswer").toString()) } catch (_: Throwable) {}
+                        android.util.Log.e("VishnuWS", "createAnswer failed: $p0")
                     }
                     override fun onSetSuccess() {}
                     override fun onSetFailure(p0: String?) {}
