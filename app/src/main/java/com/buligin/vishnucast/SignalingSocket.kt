@@ -11,6 +11,7 @@ import java.util.TimerTask
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
+
 /** Глобальный холдер единственного WebRtcCore на процесс */
 object WebRtcCoreHolder {
     @Volatile private var instance: WebRtcCore? = null
@@ -25,15 +26,18 @@ object WebRtcCoreHolder {
         }
     }
 
-    fun peek(): WebRtcCore? = instance
-
     fun closeAndClear() = synchronized(this) {
         val inst = instance
         if (inst != null) {
+            // Без прямой ссылки на WebRtcCore.close() — чтобы не ловить Unresolved reference
             try {
+                // Порядок важен: сперва пытаемся вызвать close(), если это наш WebRtcCore
                 inst.javaClass.getMethod("close").invoke(inst)
             } catch (_: Throwable) {
-                try { inst.javaClass.getMethod("dispose").invoke(inst) } catch (_: Throwable) { /* no-op */ }
+                try {
+                    // Для WebRTC-объектов (PeerConnection/Factory/Source/Track) корректно dispose()
+                    inst.javaClass.getMethod("dispose").invoke(inst)
+                } catch (_: Throwable) { /* no-op */ }
             }
         }
         instance = null
@@ -54,77 +58,21 @@ class SignalingSocket(
     handshake: NanoHTTPD.IHTTPSession
 ) : NanoWSD.WebSocket(handshake) {
 
-    companion object {
-        private val sockets = java.util.concurrent.CopyOnWriteArraySet<SignalingSocket>()
-        private val wsExec = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-            Thread(r, "vc-ws-broadcast").apply { isDaemon = true }
-        }
-
-        fun broadcastJson(obj: org.json.JSONObject) {
-            val text = obj.toString()
-            wsExec.execute {
-                for (ws in sockets) {
-                    try {
-                        ws.send(text)
-                        android.util.Log.d("VishnuMix", "WS send OK len=" + text.length)
-                    } catch (t: Throwable) {
-                        android.util.Log.e("VishnuMix", "WS send FAIL: " + t.message, t)
-                    }
-                }
-            }
-        }
-
-        fun broadcastMix(alpha: Float, micMuted: Boolean) {
-            android.util.Log.d("VishnuMix", "WS broadcastMix alpha=$alpha micMuted=$micMuted sockets=${sockets.size}")
-            val msg = org.json.JSONObject()
-                .put("type", "mix")
-                .put("alpha", alpha.coerceIn(0f, 1f))
-                .put("micMuted", micMuted)
-            broadcastJson(msg)
-        }
-    }
-
     private val webrtc = WebRtcCoreHolder.get(ctx)
-
-    // какой тип PC нужен этому сокету: /ws → MIC, /ws_player → PLAYER
-    private val kind: WebRtcCore.PcKind = when (handshake.uri) {
-        "/ws_player" -> WebRtcCore.PcKind.PLAYER
-        else -> WebRtcCore.PcKind.MIC
-    }
-
     private var pc: org.webrtc.PeerConnection? = null
 
     // учёт состояния «засчитан в счётчик»
     private val counted = AtomicBoolean(false)
     private var pollTimer: Timer? = null
 
-    override fun onOpen() {
-        sockets.add(this)
-        android.util.Log.d("VishnuMix", "WS onOpen uri=${handshakeRequest.uri} sockets=${sockets.size} kind=$kind")
-
-        // Тестовое сообщение клиенту сразу после подключения
-        try {
-            val hello = org.json.JSONObject()
-                .put("type", "mix")
-                .put("alpha", 0.0)
-                .put("micMuted", false)
-            val text = hello.toString()
-            send(text)
-            android.util.Log.d("VishnuMix", "WS onOpen test mix sent len=" + text.length)
-        } catch (t: Throwable) {
-            android.util.Log.e("VishnuMix", "WS onOpen test mix FAIL: " + t.message, t)
-        }
-    }
+    override fun onOpen() {}
 
     override fun onPong(pong: NanoWSD.WebSocketFrame?) {}
 
     override fun onMessage(message: NanoWSD.WebSocketFrame) {
         try {
             val text = message.textPayload ?: return
-            android.util.Log.d("VishnuWS", "recv uri=${handshakeRequest.uri} bytes=${text.length}")
             val obj = try { JSONObject(text) } catch (_: Throwable) { null }
-            val _type = obj?.optString("type") ?: ""
-            android.util.Log.d("VishnuWS", "msg type=$_type uri=${handshakeRequest.uri}")
             if (obj == null) return
 
             // --- keep-alive от клиента ---
@@ -167,7 +115,6 @@ class SignalingSocket(
             when (obj.optString("type", "")) {
                 "offer" -> {
                     try {
-                        android.util.Log.d("VishnuWS", "offer received, len=" + obj.optString("sdp","").length + " kind=" + kind)
                         send(JSONObject().put("type", "ack").put("stage", "offer-received").toString())
                     } catch (_: Throwable) {}
                     handleOffer(obj.getString("sdp"))
@@ -180,22 +127,18 @@ class SignalingSocket(
     }
 
     override fun onClose(code: NanoWSD.WebSocketFrame.CloseCode?, reason: String?, initiatedByRemote: Boolean) {
-        sockets.remove(this)
-        android.util.Log.d("VishnuMix", "WS onClose uri=${handshakeRequest.uri} sockets=${sockets.size} kind=$kind")
-
         stopPolling()
         if (counted.compareAndSet(true, false)) {
             ClientCounterStable.dec()
         }
-        // PC дальше корректно будет закрыт в ядре; локальную ссылку обнуляем
+        try { pc?.dispose() } catch (_: Throwable) {}
         pc = null
     }
 
     override fun onException(exception: java.io.IOException?) {}
 
     private fun handleOffer(sdp: String) {
-        // создаём PC нужного типа (MIC или PLAYER)
-        pc = webrtc.createPeerConnection(kind) { cand ->
+        pc = webrtc.createPeerConnection { cand ->
             val payload = JSONObject()
                 .put("sdpMid", cand.sdpMid)
                 .put("sdpMLineIndex", cand.sdpMLineIndex)
@@ -216,19 +159,10 @@ class SignalingSocket(
             override fun onSetSuccess() {
                 pcLocal.createAnswer(object : SdpObserver {
                     override fun onCreateSuccess(desc: SessionDescription) {
-                        // SDP-мунжинг под конкретный PC
-                        val mungedSdp = try {
-                            mungeOpusAnswerForKind(desc.description, kind)
-                        } catch (_: Throwable) {
-                            desc.description // не валим сессию, если что-то пошло не так
-                        }
-                        val munged = SessionDescription(desc.type, mungedSdp)
-
                         pcLocal.setLocalDescription(object : SdpObserver {
                             override fun onSetSuccess() {
                                 try {
-                                    send(JSONObject().put("type", "answer").put("sdp", mungedSdp).toString())
-                                    android.util.Log.d("VishnuWS", "answer sent kind=$kind len=${mungedSdp.length}")
+                                    send(JSONObject().put("type", "answer").put("sdp", desc.description).toString())
                                 } catch (_: Throwable) {}
                             }
                             override fun onSetFailure(p0: String?) {
@@ -236,9 +170,8 @@ class SignalingSocket(
                             }
                             override fun onCreateSuccess(p0: SessionDescription?) {}
                             override fun onCreateFailure(p0: String?) {}
-                        }, munged)
+                        }, desc)
                     }
-
                     override fun onCreateFailure(p0: String?) {
                         try { send(JSONObject().put("type", "error").put("message", "createAnswer").toString()) } catch (_: Throwable) {}
                     }
@@ -261,16 +194,13 @@ class SignalingSocket(
                 override fun run() {
                     val cur = pc ?: return
                     val st = try { cur.iceConnectionState() } catch (_: Throwable) { null }
-                    if (st == org.webrtc.PeerConnection.IceConnectionState.CONNECTED
-                        || st == org.webrtc.PeerConnection.IceConnectionState.COMPLETED) {
+                    if (st == org.webrtc.PeerConnection.IceConnectionState.CONNECTED) {
                         if (counted.compareAndSet(false, true)) {
                             ClientCounterStable.inc()
                         }
                         stopPolling()
                     } else if (st == org.webrtc.PeerConnection.IceConnectionState.FAILED
-                        || st == org.webrtc.PeerConnection.IceConnectionState.CLOSED
-                        || st == org.webrtc.PeerConnection.IceConnectionState.DISCONNECTED) {
-                        android.util.Log.d("VishnuWS", "ICE state=$st kind=$kind (stop polling)")
+                        || st == org.webrtc.PeerConnection.IceConnectionState.CLOSED) {
                         stopPolling()
                     }
                 }
@@ -281,152 +211,5 @@ class SignalingSocket(
     private fun stopPolling() {
         try { pollTimer?.cancel() } catch (_: Throwable) {}
         pollTimer = null
-    }
-
-    // ====== SDP MUNGE (индивидуально для MIC/PLAYER) ======
-    // MIC: 64 kbps, ptime=10, DTX off, CBR, FEC off
-    // PLAYER: 128 kbps, ptime=40, DTX off, CBR, FEC off, stereo=1
-    private fun mungeOpusAnswerForKind(sdpIn: String, kind: WebRtcCore.PcKind): String {
-        val sdp = sdpIn.replace("\r\n", "\n")
-        val lines = sdp.split("\n")
-
-        val headers = StringBuilder()
-        val sections = mutableListOf<StringBuilder>()
-        var cur = StringBuilder()
-        var seenMedia = false
-
-        for (ln in lines) {
-            if (ln.startsWith("m=")) {
-                if (!seenMedia) {
-                    headers.append(cur.toString())
-                    cur = StringBuilder()
-                    seenMedia = true
-                } else {
-                    sections.add(cur)
-                    cur = StringBuilder()
-                }
-            }
-            cur.append(ln).append('\n')
-        }
-        if (!seenMedia) return sdpIn
-        if (cur.isNotEmpty()) sections.add(cur)
-
-        fun processAudioSection(body: String, isPlayer: Boolean): String {
-            val ls = body.trim('\n').split("\n").toMutableList()
-            var mLineIdx = -1
-            var opusPt: String? = null
-            val toRemoveIdx = mutableSetOf<Int>()
-
-            for (i in ls.indices) {
-                val l = ls[i]
-                if (l.startsWith("m=audio ")) mLineIdx = i
-                val m = Regex("""^a=rtpmap:(\d+)\s+opus/48000/2""").find(l)
-                if (m != null) opusPt = m.groupValues[1]
-            }
-            if (mLineIdx < 0 || opusPt == null) return body
-
-            // Оставляем в m-line только opus PT (без дублей) — строгое восстановление
-            run {
-                val m = ls[mLineIdx]
-                val parts = m.split(" ").filter { it.isNotEmpty() }
-                val proto = if (parts.size >= 3) parts[2] else "UDP/TLS/RTP/SAVPF"
-                val port = if (parts.size >= 2) parts[1] else "9"
-                ls[mLineIdx] = "m=audio $port $proto $opusPt"
-            }
-
-
-
-            // Сносим rtpmap/fmtp/rtcp-fb для всех PT != opus
-            val allowed = setOf(opusPt!!)
-            for (i in ls.indices) {
-                val l = ls[i]
-                val mm = Regex("""^a=(rtpmap|fmtp|rtcp-fb):(\d+)""").find(l)
-                if (mm != null) {
-                    val pt = mm.groupValues[2]
-                    if (!allowed.contains(pt)) toRemoveIdx.add(i)
-                }
-            }
-            for (i in toRemoveIdx.sortedDescending()) ls.removeAt(i)
-
-            // fmtp для opus
-            val wantFmtp = if (!isPlayer) {
-                // MIC
-                listOf(
-                    "stereo=0",
-                    "sprop-stereo=0",
-                    "maxaveragebitrate=64000",
-                    "usedtx=0",
-                    "cbr=1",
-                    "useinbandfec=0"
-                ).joinToString(";")
-            } else {
-                // PLAYER
-                listOf(
-                    "stereo=1",
-                    "sprop-stereo=1",
-                    "maxaveragebitrate=128000",
-                    "usedtx=0",
-                    "cbr=1",
-                    "useinbandfec=0"
-                ).joinToString(";")
-            }
-            var fmtpSet = false
-            for (i in ls.indices) {
-                if (ls[i].startsWith("a=fmtp:$opusPt ")) {
-                    ls[i] = "a=fmtp:$opusPt $wantFmtp"
-                    fmtpSet = true
-                    break
-                }
-            }
-            if (!fmtpSet) {
-                var inserted = false
-                for (i in ls.indices) {
-                    if (ls[i].startsWith("a=rtpmap:$opusPt ")) {
-                        ls.add(i + 1, "a=fmtp:$opusPt $wantFmtp")
-                        inserted = true
-                        break
-                    }
-                }
-                if (!inserted) ls.add("a=fmtp:$opusPt $wantFmtp")
-            }
-
-            // ptime / maxptime секционные
-            val wantPtime = if (!isPlayer) 10 else 40
-            val wantMaxPtime = if (!isPlayer) 20 else 60
-
-            fun upsertAttr(name: String, value: Int) {
-                var set = false
-                for (i in ls.indices) {
-                    if (ls[i].startsWith("a=$name:")) {
-                        ls[i] = "a=$name:$value"
-                        set = true
-                        break
-                    }
-                }
-                if (!set) ls.add("a=$name:$value")
-            }
-            upsertAttr("ptime", wantPtime)
-            upsertAttr("maxptime", wantMaxPtime)
-
-            val out = ls.joinToString("\n", postfix = "\n")
-            // На всякий случай: прибьём возможный дубль PT в m=audio ещё раз регуляркой
-            return out.replace(Regex("""^m=audio\s+(\d+)\s+(\S+)\s+(\d+)(?:\s+\3)+\s*$""", RegexOption.MULTILINE)) {
-                val port = it.groupValues[1]; val proto = it.groupValues[2]; val pt = it.groupValues[3]
-                "m=audio $port $proto $pt"
-            }
-        }
-
-        val out = StringBuilder()
-        out.append(headers.toString())
-        val isPlayer = (kind == WebRtcCore.PcKind.PLAYER)
-        for (sec in sections) {
-            val body = sec.toString()
-            if (body.startsWith("m=audio ")) {
-                out.append(processAudioSection(body, isPlayer))
-            } else {
-                out.append(body)
-            }
-        }
-        return out.toString().replace("\n", "\r\n")
     }
 }

@@ -8,16 +8,8 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import android.util.Log
-import org.webrtc.IceCandidate
-import org.webrtc.PeerConnection
-import org.webrtc.SessionDescription
 
 class CastService : Service() {
-
-    private lateinit var core: WebRtcCore
-
-    private var _mixerObserver: androidx.lifecycle.Observer<Float>? = null
 
     private var server: VishnuServer? = null
     private var isFgShown: Boolean = false // флаг: уведомление реально запущено через startForeground
@@ -35,26 +27,6 @@ class CastService : Service() {
         // Mute по умолчанию
         applyMute(true)
 
-        // === MIX bridge: наблюдаем alpha и шлём в браузер ===
-        val mixObserver = androidx.lifecycle.Observer<Float> { a ->
-            val muted = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MUTED, true)
-            try {
-                val alpha = (a ?: 0f).coerceIn(0f, 1f)
-                android.util.Log.d("VishnuMix", "CastService.observe alpha=$alpha micMuted=$muted")
-                SignalingSocket.broadcastMix(alpha, muted)
-                WebRtcCoreHolder.get(applicationContext).trySetActiveByAlpha(alpha)
-                WebRtcCoreHolder.get(applicationContext).setForceProbeByAlpha(alpha, muted)
-                android.util.Log.d("VishnuMix", "CastService.broadcastMix sent")
-            } catch (_: Throwable) { }
-        }
-        // гарантируем, что PeerManager-ы есть
-        PeerManagers.ensure(applicationContext)
-
-
-        _mixerObserver = mixObserver
-        com.buligin.vishnucast.player.MixerState.alpha01.observeForever(mixObserver)
-
-
         isRunning = true
     }
 
@@ -67,7 +39,9 @@ class CastService : Service() {
                 return START_NOT_STICKY
             }
 
-            ACTION_MUTE -> applyMute(true)
+            ACTION_MUTE -> {
+                applyMute(true)
+            }
 
             ACTION_UNMUTE -> {
                 // Перед открытием микрофона — перевзводим FGS с типом MICROPHONE
@@ -102,26 +76,8 @@ class CastService : Service() {
         isRunning = false
         try { server?.shutdown() } catch (_: Throwable) {}
         server = null
-
-        // Закрыть обе PC и освободить нативный источник
-        try {
-            val c = WebRtcCoreHolder.peek()
-            c?.close(WebRtcCore.PcKind.MIC)
-            c?.close(WebRtcCore.PcKind.PLAYER)
-            c?.dispose()
-            Log.d("CastService", "WebRtcCore closed (MIC/PLAYER) and disposed")
-        } catch (_: Throwable) {}
-
-        try {
-            WebRtcCoreHolder.closeAndClear()
-        } catch (_: Throwable) {}
-
+        try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
         super.onDestroy()
-
-        try {
-            _mixerObserver?.let { com.buligin.vishnucast.player.MixerState.alpha01.removeObserver(it) }
-        } catch (_: Throwable) { }
-        _mixerObserver = null
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -129,17 +85,15 @@ class CastService : Service() {
     // --- FGS helper ---
     private fun startAsForeground(withMicType: Boolean) {
         val notif = buildRunningNotification()
-        val fgsTypes =
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
-                (if (withMicType) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0) or
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID, notif, fgsTypes)
+        if (Build.VERSION.SDK_INT >= 29) {
+            val type = if (withMicType)
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            else
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            startForeground(NOTIF_ID, notif, type)
         } else {
             startForeground(NOTIF_ID, notif)
         }
-
         isFgShown = true
     }
 
@@ -162,34 +116,19 @@ class CastService : Service() {
         updateNotification()
     }
 
-    // ========= 2PC SIGNALING HELPERS (вызываются из WS-роутеров) =========
-
-    /** Создать PC по типу и вернуть ссылку (если нужно держать у себя). */
-    fun createPc(kind: WebRtcCore.PcKind, onIce: (IceCandidate) -> Unit): PeerConnection? {
-        return WebRtcCoreHolder.get(applicationContext).createPeerConnection(kind, onIce)
-    }
-
-    /** Установить удалённый SDP (offer) и получить локальный (answer) через callback. */
-    fun setRemoteOffer(kind: WebRtcCore.PcKind, remoteSdp: String, onLocalAnswer: (SessionDescription) -> Unit) {
-        WebRtcCoreHolder.get(applicationContext).setRemoteSdp(kind, remoteSdp, onLocalAnswer)
-    }
-
-    /** Добавить ICE-кандидата для конкретной PC. */
-    fun addIce(kind: WebRtcCore.PcKind, cand: IceCandidate) {
-        WebRtcCoreHolder.get(applicationContext).addIceCandidate(kind, cand)
-    }
-
-    /** Закрыть конкретную PC. */
-    fun closePc(kind: WebRtcCore.PcKind) {
-        WebRtcCoreHolder.get(applicationContext).close(kind)
-    }
-
     // --- Notification ---
     private fun buildRunningNotification(): Notification {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val piOpen = PendingIntent.getActivity(this, 0, openIntent, pendingFlags())
+
+        // Кнопка "Выход" — открывает Activity с ACTION_EXIT_NOW (без broadcast)
+//        val exitIntent = Intent(this, MainActivity::class.java).apply {
+//            action = ACTION_EXIT_NOW
+//            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+//        }
+//        val piExit = PendingIntent.getActivity(this, 10, exitIntent, pendingFlags())
 
         val muted = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MUTED, true)
         val text = if (muted) getString(R.string.cast_stopped) else getString(R.string.cast_running)
@@ -199,18 +138,22 @@ class CastService : Service() {
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setContentIntent(piOpen)
-            .setOngoing(true)
+            .setOngoing(true) // делает уведомление несмахиваемым
             .setAutoCancel(false)
             .setCategory(Notification.CATEGORY_SERVICE)
+           // .addAction(0, getString(R.string.action_exit), piExit)
 
+        // Сделать показ foreground-уведомления немедленным (API 31+, совместимо через compat)
         b.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
 
         val notif = b.build()
+        // дубль страховки от некоторого OEM: NO_CLEAR
         notif.flags = notif.flags or Notification.FLAG_NO_CLEAR or Notification.FLAG_ONGOING_EVENT
         return notif
     }
 
     private fun updateNotification() {
+        // Обновляем только еслиForeground реально показан; иначе избавимся от "Cannot find enqueued record..."
         if (!isFgShown) return
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIF_ID, buildRunningNotification())
@@ -241,7 +184,7 @@ class CastService : Service() {
     }
 
     companion object {
-        const val ACTION_EXIT_NOW = "com.buligin.vishnucast.action.EXIT_NOW"
+        const val ACTION_EXIT_NOW = "com.buligin.vishnucast.action.EXIT_NOW" // интент в Activity
         const val ACTION_EXIT = "com.buligin.vishnucast.action.EXIT"
 
         @Volatile var isRunning: Boolean = false
