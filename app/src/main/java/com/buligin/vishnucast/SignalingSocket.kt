@@ -4,8 +4,10 @@ import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoWSD
 import org.json.JSONObject
 import org.webrtc.IceCandidate
-import org.webrtc.SessionDescription
+import org.webrtc.PeerConnection
 import org.webrtc.SdpObserver
+import org.webrtc.SessionDescription
+import org.webrtc.MediaConstraints
 import java.util.Timer
 import java.util.TimerTask
 import java.util.concurrent.atomic.AtomicBoolean
@@ -51,7 +53,7 @@ class SignalingSocket(
 ) : NanoWSD.WebSocket(handshake) {
 
     private val webrtc = WebRtcCoreHolder.get(ctx)
-    private var pc: org.webrtc.PeerConnection? = null
+    @Volatile private var pc: PeerConnection? = null
 
     // учёт состояния «засчитан в счётчик»
     private val counted = AtomicBoolean(false)
@@ -66,7 +68,6 @@ class SignalingSocket(
             val text = message.textPayload ?: return
             val obj = try { JSONObject(text) } catch (_: Throwable) { null } ?: return
 
-            // --- keep-alive от клиента ---
             when (obj.optString("type", "")) {
                 "ping" -> {
                     try {
@@ -81,7 +82,7 @@ class SignalingSocket(
                 "ka" -> return
             }
 
-            // --- ICE-кандидаты (поддерживаем оба формата) ---
+            // ICE: поддерживаем и вложенный объект, и плоский формат
             if (obj.optString("type", "") == "ice") {
                 val cObj = obj.optJSONObject("candidate") ?: JSONObject()
                 val c = IceCandidate(
@@ -102,13 +103,9 @@ class SignalingSocket(
                 }
             }
 
-            // --- SDP offer ---
-            when (obj.optString("type", "")) {
-                "offer" -> {
-                    try { send(JSONObject().put("type", "ack").put("stage", "offer-received").toString()) } catch (_: Throwable) {}
-                    handleOffer(obj.getString("sdp"))
-                }
-                else -> { /* no-op */ }
+            if (obj.optString("type", "") == "offer") {
+                try { send(JSONObject().put("type", "ack").put("stage", "offer-received").toString()) } catch (_: Throwable) {}
+                handleOffer(obj.getString("sdp"))
             }
         } catch (_: Exception) {
             try { send(JSONObject().put("type", "error").put("message", "bad message").toString()) } catch (_: Throwable) {}
@@ -126,70 +123,43 @@ class SignalingSocket(
 
     override fun onException(exception: java.io.IOException?) {}
 
-    // --- оставляем только уникальные payload type в строке m=audio; прочее не трогаем ---
-    private fun dedupMLinePayloads(sdpIn: String): String {
-        val s = sdpIn.replace("\r\n", "\n")
-        val lines = s.lines().toMutableList()
-        for (i in lines.indices) {
-            val l = lines[i]
-            if (l.startsWith("m=audio ")) {
-                val parts = l.trim().split(Regex("\\s+"))
-                if (parts.size >= 4) {
-                    val prefix = parts.subList(0, 3) // ["m=audio", "<port>", "<proto>"]
-                    val payloads = linkedSetOf<String>() // порядок сохраняем, дубли убираем
-                    for (k in 3 until parts.size) {
-                        val p = parts[k]
-                        if (p.isNotEmpty()) payloads.add(p)
-                    }
-                    lines[i] = prefix.joinToString(" ") + " " + payloads.joinToString(" ")
-                }
-                break
-            }
-        }
-        return lines.joinToString("\r\n", postfix = "\r\n")
-    }
-
     private fun handleOffer(sdp: String) {
-        // создаём PC и фиксируем ссылку
-        pc = webrtc.createPeerConnection { cand ->
+        // 1) создать PC и зафиксировать ссылку
+        val created = webrtc.createPeerConnection { cand ->
             val payload = JSONObject()
                 .put("sdpMid", cand.sdpMid)
                 .put("sdpMLineIndex", cand.sdpMLineIndex)
                 .put("candidate", cand.sdp)
             val ice = JSONObject().put("type", "ice").put("candidate", payload)
             try { send(ice.toString()) } catch (_: Throwable) {}
-        }
-
-        val pcLocal = pc ?: run {
-            try { send(JSONObject().put("type", "error").put("message", "pc-null").toString()) } catch (_: Throwable) {}
+        } ?: run {
+            try { send(JSONObject().put("type", "error").put("message", "pc-create-failed").toString()) } catch (_: Throwable) {}
             return
         }
+        pc = created
+        val pcLocal: PeerConnection = created
 
         startPollingIceConnected()
 
+        // 2) применить remote offer и синтезировать answer БЕЗ любых правок SDP
         val remote = SessionDescription(SessionDescription.Type.OFFER, sdp)
         pcLocal.setRemoteDescription(object : SdpObserver {
             override fun onSetSuccess() {
-                // ВАЖНО: используем только "замороженную" ссылку pcLocal
                 pcLocal.createAnswer(object : SdpObserver {
-                    override fun onCreateSuccess(desc: SessionDescription) {
-                        val mungedSdp = try {
-                            dedupMLinePayloads(desc.description)
-                        } catch (t: Throwable) {
-                            android.util.Log.w("VishnuWS", "dedup m=audio failed: ${t.message}")
-                            desc.description
+                    override fun onCreateSuccess(desc: SessionDescription?) {
+                        if (desc == null) {
+                            android.util.Log.e("VishnuWS", "createAnswer returned null desc")
+                            return
                         }
-                        val local = SessionDescription(desc.type, mungedSdp)
-
-                        val localPc = pcLocal // фиксируем ссылку для колбэка
-                        localPc.setLocalDescription(object : SdpObserver {
+                        // Никаких правок SDP: используем ровно тот объект, что вернул WebRTC
+                        pcLocal.setLocalDescription(object : SdpObserver {
                             override fun onSetSuccess() {
                                 try {
                                     val json = JSONObject()
                                         .put("type", "answer")
-                                        .put("sdp", mungedSdp)
+                                        .put("sdp", desc.description)
                                     send(json.toString())
-                                    android.util.Log.d("VishnuWS", "answer sent len=${mungedSdp.length}")
+                                    android.util.Log.d("VishnuWS", "answer sent len=${desc.description?.length ?: 0}")
                                 } catch (_: Throwable) { /* ignore */ }
                             }
                             override fun onSetFailure(p0: String?) {
@@ -197,17 +167,17 @@ class SignalingSocket(
                             }
                             override fun onCreateSuccess(p0: SessionDescription?) {}
                             override fun onCreateFailure(p0: String?) {}
-                        }, local)
+                        }, desc)
                     }
-
                     override fun onCreateFailure(p0: String?) {
                         android.util.Log.e("VishnuWS", "createAnswer failed: $p0")
                     }
                     override fun onSetSuccess() {}
                     override fun onSetFailure(p0: String?) {}
-                }, org.webrtc.MediaConstraints())
+                }, MediaConstraints())
             }
             override fun onSetFailure(p0: String?) {
+                android.util.Log.e("VishnuWS", "setRemoteDescription failed: $p0")
                 try { send(JSONObject().put("type", "error").put("message", "setRemoteDescription").toString()) } catch (_: Throwable) {}
             }
             override fun onCreateSuccess(p0: SessionDescription?) {}
@@ -222,13 +192,13 @@ class SignalingSocket(
                 override fun run() {
                     val cur = pc ?: return
                     val st = try { cur.iceConnectionState() } catch (_: Throwable) { null }
-                    if (st == org.webrtc.PeerConnection.IceConnectionState.CONNECTED) {
+                    if (st == PeerConnection.IceConnectionState.CONNECTED) {
                         if (counted.compareAndSet(false, true)) {
                             ClientCounterStable.inc()
                         }
                         stopPolling()
-                    } else if (st == org.webrtc.PeerConnection.IceConnectionState.FAILED
-                        || st == org.webrtc.PeerConnection.IceConnectionState.CLOSED) {
+                    } else if (st == PeerConnection.IceConnectionState.FAILED
+                        || st == PeerConnection.IceConnectionState.CLOSED) {
                         stopPolling()
                     }
                 }
