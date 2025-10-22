@@ -28,14 +28,13 @@ if (NOT EXISTS "${WEBRTC_JNI_DIR}/${ANDROID_ABI}/libjingle_peerconnection_so.so"
 endif()
 
 # ===== Источники нашей нативной библиотеки =====
-add_library(
-        vishnuplayer
-        SHARED
-#        NativePlayerSource.cpp
-        PlayerSendEngine.cpp
-        PlayerJniBridge.cpp
+add_library( vishnuplayer SHARED
+        vishnuplayer.cpp
+#        PlayerSendEngine.cpp
+#        PlayerJniBridge.cpp
 #        NativePlayerSourceWebRtc.cpp
 #        webrtc_keyfunc_shim.cpp
+#        NativePlayerSource.cpp
 )
 
 # Совместимость для старых аннотаций в WebRTC M137:
@@ -53,7 +52,7 @@ target_compile_definitions(vishnuplayer PRIVATE
 
 # Подключаем include после объявления таргета
 target_include_directories(vishnuplayer PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
+#        ${CMAKE_CURRENT_SOURCE_DIR}
         ${WEBRTC_HEADERS_DIR} # наши заголовки WebRTC (api/, rtc_base/, pc/, media/, ...)
 )
 

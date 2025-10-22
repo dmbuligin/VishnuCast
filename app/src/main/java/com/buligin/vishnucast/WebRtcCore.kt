@@ -14,14 +14,19 @@ import java.util.Timer
 import java.util.TimerTask
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 class WebRtcCore(private val ctx: Context) {
+
+    // ==== ДОБАВЛЕНО: типы PC для совместимости с PeerManager ====
+    enum class PcKind { MIC, PLAYER }
+
+    // Храним созданные этим классом PC по типам (только для врапперов kind-API)
+    @Volatile private var pcMic: PeerConnection? = null
+    @Volatile private var pcPlayer: PeerConnection? = null
 
     private val pendingPeerCount = AtomicInteger(0)
     private var guardTimer: Timer? = null
@@ -214,6 +219,7 @@ class WebRtcCore(private val ctx: Context) {
         SignalLevel.post(percent)
     }
 
+    // ===== ТВОЙ last-stable метод (НЕ МЕНЯЛ) =====
     fun createPeerConnection(onIce: (IceCandidate) -> Unit): PeerConnection? {
         val rtcConfig = PeerConnection.RTCConfiguration(
             listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
@@ -457,8 +463,6 @@ class WebRtcCore(private val ctx: Context) {
         private const val TAG = "VishnuCast"
     }
 
-    // ======== ВНУТРЕННИЕ КЛАССЫ/ОБЪЕКТЫ ========
-
     /** Однократная safe-инициализация WebRTC. */
     private object WebRtcInit {
         private val done = AtomicBoolean(false)
@@ -502,7 +506,7 @@ class WebRtcCore(private val ctx: Context) {
                 var ar: AudioRecord? = null
                 try {
                     val rate = 48000
-                    val chCfg = AudioFormat.CHANNEL_IN_MONO  // fallback на моно
+                    val chCfg = AudioFormat.CHANNEL_IN_MONO
                     val fmt = AudioFormat.ENCODING_PCM_16BIT
                     val minBuf = AudioRecord.getMinBufferSize(rate, chCfg, fmt)
                     val bufSize = max(minBuf * 2, 960 * 10)
@@ -570,5 +574,59 @@ class WebRtcCore(private val ctx: Context) {
         }
 
         fun isRunning(): Boolean = running
+    }
+
+    // ==== ДОБАВЛЕНО: врапперы kind-API для PeerManager (не ломают существующий код) ====
+
+    /** Создать PC по типу; внутри вызывает твой last-stable createPeerConnection(onIce). */
+    fun createPeerConnection(kind: PcKind, onIce: (IceCandidate) -> Unit): PeerConnection? {
+        val pc = createPeerConnection(onIce) ?: return null
+        when (kind) {
+            PcKind.MIC    -> pcMic = pc
+            PcKind.PLAYER -> pcPlayer = pc
+        }
+        return pc
+    }
+
+    /** Установить удалённый SDP по типу (использует сохранённый PC). */
+    fun setRemoteSdp(kind: PcKind, remoteSdp: String, onLocalSdp: (SessionDescription) -> Unit) {
+        val pc = when (kind) { PcKind.MIC -> pcMic; PcKind.PLAYER -> pcPlayer }
+        if (pc == null) { w("setRemoteSdp(kind=$kind): pc is null"); return }
+        setRemoteSdp(pc, remoteSdp, onLocalSdp)
+    }
+
+    /** Добавить ICE кандидат по типу (использует сохранённый PC). */
+    fun addIceCandidate(kind: PcKind, c: IceCandidate) {
+        val pc = when (kind) { PcKind.MIC -> pcMic; PcKind.PLAYER -> pcPlayer }
+        if (pc == null) { w("addIceCandidate(kind=$kind): pc is null"); return }
+        addIceCandidate(pc, c)
+    }
+
+    /** Закрыть PC указанного типа и сбросить ссылку (без влияния на другой PC). */
+    fun close(kind: PcKind) {
+        val pc = when (kind) {
+            PcKind.MIC -> pcMic.also { pcMic = null }
+            PcKind.PLAYER -> pcPlayer.also { pcPlayer = null }
+        }
+        try { pc?.close() } catch (_: Throwable) {}
+        if (statsPc === pc) {
+            try { statsTimer?.cancel() } catch (_: Throwable) {}
+            statsTimer = null
+            statsPc = null
+            lastEnergy = null
+            lastDuration = null
+        }
+    }
+
+    /** Совместимость: общая dispose() — мягко закрываем оба. */
+    fun dispose() {
+        close(PcKind.MIC)
+        close(PcKind.PLAYER)
+        d("dispose(): both PCs closed")
+    }
+
+    /** Совместимость: заглушка форс-пробинга по альфе (не требуется в этой ветке). */
+    fun setForceProbeByAlpha(alpha: Float, muted: Boolean) {
+        // no-op; индикатор и так работает (stats/пробник).
     }
 }
