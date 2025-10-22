@@ -123,8 +123,8 @@
   var statusEl = document.getElementById('status');
   var hintEl = document.getElementById('hint');
   var audioEl = document.getElementById('audio');
-  var langRuBtn = document.getElementById('langRuBtn');
-  var langEnBtn = document.getElementById('langEnBtn');
+  var langRuBtn = document.getElementById('lang-ru');
+  var langEnBtn = document.getElementById('lang-en');
 
   // ---------- state ----------
   var pc = null;
@@ -137,10 +137,22 @@
 
   // ---------- Language switches ----------
   (function initLang(){
-    if (langRuBtn) langRuBtn.addEventListener('click', function(){ texts.setLang('ru'); setBtn(); setStatus(); });
-    if (langEnBtn) langEnBtn.addEventListener('click', function(){ texts.setLang('en'); setBtn(); setStatus(); });
-    texts.apply();
-  })();
+    function updateAria(){
+    if (!langRuBtn || !langEnBtn) return;
+        var isRu = (texts.lang === 'ru');
+        langRuBtn.setAttribute('aria-current', isRu ? 'true' : 'false');
+        langEnBtn.setAttribute('aria-current', isRu ? 'false' : 'true');
+    }
+    if (langRuBtn) langRuBtn.addEventListener('click', function(){
+        texts.setLang('ru'); updateAria(); setBtn(); setStatus();
+    });
+    if (langEnBtn) langEnBtn.addEventListener('click', function(){
+        texts.setLang('en'); updateAria(); setBtn(); setStatus();
+    });
+    texts.apply(); updateAria();
+    })();
+
+
 
   // ---------- Button handler ----------
   if (btn) {
