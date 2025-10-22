@@ -137,6 +137,64 @@ class SignalingSocket(
 
     override fun onException(exception: java.io.IOException?) {}
 
+
+
+    private fun normalizeOpusOnlyAnswer(sdpIn: String): String {
+        // Нормализуем под один Opus-поток: m=audio ... 111, a=rtpmap/fmtp/rtcp-fb только для opus
+        val s = sdpIn.replace("\r\n", "\n")
+        val lines = s.lines()
+
+        // 1) Найдём PT для opus/48000/2
+        var opusPt: String? = null
+        for (l in lines) {
+            val m = Regex("""^a=rtpmap:(\d+)\s+opus/48000/2""").find(l)
+            if (m != null) { opusPt = m.groupValues[1]; break }
+        }
+        if (opusPt == null) return sdpIn // нет opus — ничего не меняем
+
+        // 2) Пересобираем SDP
+        val out = ArrayList<String>(lines.size)
+        var mAudioDone = false
+
+        for (l in lines) {
+            if (l.startsWith("m=audio ")) {
+                // m=audio <port> <proto> <opusPt>
+                val parts = l.split(" ").filter { it.isNotEmpty() }
+                val port = if (parts.size >= 2) parts[1] else "9"
+                val proto = if (parts.size >= 3) parts[2] else "UDP/TLS/RTP/SAVPF"
+                out.add("m=audio $port $proto $opusPt")
+                mAudioDone = true
+                continue
+            }
+
+            // a=rtpmap/fmtp/rtcp-fb — оставляем только для opus PT
+            val mm = Regex("""^a=(rtpmap|fmtp|rtcp-fb):(\d+)(.*)$""").find(l)
+            if (mm != null) {
+                val pt = mm.groupValues[2]
+                // rtpmap: оставляем только opus; остальные PT отбрасываем
+                if (l.startsWith("a=rtpmap:")) {
+                    if (l.contains("opus/48000/2")) out.add(l)
+                } else {
+                    if (pt == opusPt) out.add(l)
+                }
+                continue
+            }
+
+            // Остальные строки (ice, fingerprint, setup, extmap, msid и т.д.) — пропускаем как есть
+            out.add(l)
+        }
+
+        // 3) На случай, если m=audio не попалась (крайний случай), ничего не ломаем
+        if (!mAudioDone) return sdpIn
+
+        // 4) Гарантируем CRLF и завершающий CRLF
+        return out.joinToString("\r\n", postfix = "\r\n")
+    }
+
+
+
+
+
     private fun handleOffer(sdp: String) {
         pc = webrtc.createPeerConnection { cand ->
             val payload = JSONObject()
@@ -158,20 +216,26 @@ class SignalingSocket(
         pcLocal.setRemoteDescription(object : SdpObserver {
             override fun onSetSuccess() {
                 pcLocal.createAnswer(object : SdpObserver {
+
                     override fun onCreateSuccess(desc: SessionDescription) {
+                        val munged = normalizeOpusOnlyAnswer(desc.description)
+                        val local = SessionDescription(desc.type, munged)
+
                         pcLocal.setLocalDescription(object : SdpObserver {
                             override fun onSetSuccess() {
                                 try {
-                                    send(JSONObject().put("type", "answer").put("sdp", desc.description).toString())
+                                    send(org.json.JSONObject().put("type", "answer").put("sdp", munged).toString())
+                                    android.util.Log.d("VishnuWS", "answer sent len=${munged.length}")
                                 } catch (_: Throwable) {}
                             }
-                            override fun onSetFailure(p0: String?) {
-                                try { send(JSONObject().put("type", "error").put("message", "setLocalDescription").toString()) } catch (_: Throwable) {}
-                            }
+                            override fun onSetFailure(p0: String?) {}
                             override fun onCreateSuccess(p0: SessionDescription?) {}
                             override fun onCreateFailure(p0: String?) {}
-                        }, desc)
+                        }, local)
                     }
+
+
+
                     override fun onCreateFailure(p0: String?) {
                         try { send(JSONObject().put("type", "error").put("message", "createAnswer").toString()) } catch (_: Throwable) {}
                     }
