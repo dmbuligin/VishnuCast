@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
@@ -15,19 +16,13 @@ import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import com.buligin.vishnucast.player.jni.PlayerJni
 import kotlin.concurrent.thread
-import android.media.AudioAttributes
-
-
-
-
 
 /**
  * Захват системного аудио (Android 10+) и подача в JNI 10мс фреймами (48k mono, s16).
  * НИЧЕГО не делает ниже Android Q.
  *
- * Логика старта:
- *  - PlayerUiBinder показывает системный диалог (MediaProjection) и заполняет PlayerCapture.{resultCode,resultData}
- *  - После grant вызывает PlayerSystemCapture.start(activity)
+ * Старт: PlayerUiBinder показывает системный диалог (MediaProjection) и заполняет PlayerCapture.{resultCode,resultData},
+ * затем вызывает PlayerSystemCapture.start(activity).
  */
 @RequiresApi(Build.VERSION_CODES.Q)
 object PlayerSystemCapture {
@@ -39,28 +34,12 @@ object PlayerSystemCapture {
     private const val EN = AudioFormat.ENCODING_PCM_16BIT
     private const val FRAME_SAMPLES = 480 // 10 мс @ 48k
 
-    @Volatile private var enginePtr: Long = 0L
-
+    // Нативный источник (создаётся/живет в WebRtcCore; сюда его хэндл передают через setNativeSourceHandle)
     @Volatile private var nativeSourcePtr: Long = 0L
 
     @Volatile private var projection: MediaProjection? = null
     @Volatile private var record: AudioRecord? = null
     @Volatile private var recordingThread: Thread? = null
-
-    private fun hasReadAccess(ctx: android.content.Context, uri: android.net.Uri): Boolean {
-        return try {
-            ctx.contentResolver.openFileDescriptor(uri, "r")?.use { }   // просто пробуем открыть
-            true
-        } catch (_: SecurityException) {
-            false
-        } catch (_: Throwable) {
-            // другие ошибки нас сейчас не волнуют, важно не уронить процесс
-            false
-        }
-    }
-
-
-
 
     fun setNativeSourceHandle(ptr: Long) {
         nativeSourcePtr = ptr
@@ -72,10 +51,6 @@ object PlayerSystemCapture {
     /** Старт захвата. Все ранние выходы логируются. */
     fun start(activity: Activity) {
         Log.d(TAG, "start() requested")
-
-        // полезно оставить след кто нас позвал
-        Log.d(TAG, "reason=start_by_alpha") // раскомментируй, если хочешь видеть источник
-
 
         // Защита от повторного старта
         if (recordingThread != null) {
@@ -125,28 +100,13 @@ object PlayerSystemCapture {
 
         // 4) Готовим конфигурацию AudioPlaybackCapture
         val config = AudioPlaybackCaptureConfiguration.Builder(mp)
-            // Минимум одно правило обязательно, иначе IllegalArgumentException.
-            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)               // медиа-воспроизведение (ExoPlayer)
-            .addMatchingUsage(AudioAttributes.USAGE_GAME)                // на всякий случай (если поменяешь атрибуты)
-            .addMatchingUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION) // системные «бипы» внутри твоего процесса
-            .addMatchingUid(activity.applicationInfo.uid)                // гарантируем захват СВОЕГО плеера
+            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+            .addMatchingUsage(AudioAttributes.USAGE_GAME)
+            .addMatchingUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+            .addMatchingUid(activity.applicationInfo.uid)
             .build()
 
-
-        // 5) Создаём JNI-движок один раз
-        if (enginePtr == 0L) {
-            enginePtr = try {
-                PlayerJni.createEngine().also {
-                    Log.d(TAG, "JNI engine created: ptr=$it")
-                }
-            } catch (t: Throwable) {
-                Log.e(TAG, "JNI createEngine failed", t)
-                safeStopAndReleaseProjection()
-                return
-            }
-        }
-
-        // 6) Строим AudioRecord
+        // 5) Строим AudioRecord
         val minBuf = AudioRecord.getMinBufferSize(SR, CH, EN).coerceAtLeast(FRAME_SAMPLES * 4)
         val rec = try {
             AudioRecord.Builder()
@@ -179,7 +139,7 @@ object PlayerSystemCapture {
         record = rec
         Log.d(TAG, "AudioRecord built (minBuf=$minBuf)")
 
-        // 7) Старт записи
+        // 6) Старт записи
         try {
             rec.startRecording()
             Log.d(TAG, "AudioRecord.startRecording OK")
@@ -197,7 +157,7 @@ object PlayerSystemCapture {
             return
         }
 
-        // 8) Поток чтения по 10мс фреймам
+        // 7) Поток чтения по 10мс фреймам → в JNI только если есть nativeSourcePtr
         val th = thread(name = "vc-player-capture", isDaemon = true) {
             Log.d(TAG, "capture thread started (10ms frames)")
             val frame = ShortArray(FRAME_SAMPLES)
@@ -218,22 +178,14 @@ object PlayerSystemCapture {
                 while (tempLen - off >= FRAME_SAMPLES) {
                     System.arraycopy(temp, off, frame, 0, FRAME_SAMPLES)
                     off += FRAME_SAMPLES
-                    try {
-                        PlayerJni.pushPcm48kMono(enginePtr, frame, FRAME_SAMPLES)
 
-                        val src = nativeSourcePtr
-                        if (src != 0L) {
-                            try {
-                                PlayerJni.sourcePushPcm48kMono(src, frame, FRAME_SAMPLES)
-                            } catch (t: Throwable) {
-                                Log.e(TAG, "JNI sourcePushPcm failed", t)
-                            }
+                    val src = nativeSourcePtr
+                    if (src != 0L) {
+                        try {
+                            PlayerJni.sourcePushPcm48kMono(src, frame, FRAME_SAMPLES)
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "JNI sourcePushPcm failed", t)
                         }
-
-
-                    } catch (t: Throwable) {
-                        Log.e(TAG, "JNI pushPcm failed", t)
-                        // продолжаем пытаться
                     }
                 }
                 // перенос остатка в начало
@@ -248,60 +200,38 @@ object PlayerSystemCapture {
         recordingThread = th
     }
 
-    /** Остановить чтение/запись и остановить MediaProjection (без уничтожения JNI). */
+    /** Остановить чтение/запись и остановить MediaProjection (без уничтожения JNI-источника). */
     fun stop() {
         Log.d(TAG, "stop() requested")
-        try {
-            recordingThread?.interrupt()
-        } catch (_: Throwable) {}
-        try {
-            recordingThread?.join(200)
-        } catch (_: Throwable) {}
+        try { recordingThread?.interrupt() } catch (_: Throwable) {}
+        try { recordingThread?.join(200) } catch (_: Throwable) {}
         recordingThread = null
 
-        try {
-            record?.stop()
-        } catch (_: Throwable) {}
-        try {
-            record?.release()
-        } catch (_: Throwable) {}
+        try { record?.stop() } catch (_: Throwable) {}
+        try { record?.release() } catch (_: Throwable) {}
         record = null
 
-        try {
-            projection?.stop()
-        } catch (_: Throwable) {}
+        try { projection?.stop() } catch (_: Throwable) {}
         projection = null
 
+        // источник может жить дольше (им управляет WebRtcCore); просто отцепляем хэндл
         nativeSourcePtr = 0L
 
-
-        Log.d(TAG, "AudioRecord released")
-        Log.d(TAG, "MediaProjection stopped")
+        Log.d(TAG, "AudioRecord released; MediaProjection stopped")
     }
 
-    /** Полный релиз JNI-движка (после stop). */
+    /** Полный релиз. JNI-источник не трогаем — его уничтожает WebRtcCore. */
     fun release() {
         Log.d(TAG, "release() requested")
         stop()
-        val ptr = enginePtr
-        if (ptr != 0L) {
-            try {
-                PlayerJni.destroyEngine(ptr)
-                Log.d(TAG, "JNI engine destroyed")
-            } catch (_: Throwable) {}
-        }
-        enginePtr = 0L
-
         nativeSourcePtr = 0L
-
-
     }
 
     /** Установить mute в JNI (без остановки захвата). */
     fun setMuted(muted: Boolean) {
-        val ptr = enginePtr
-        if (ptr != 0L) {
-            try { PlayerJni.setMuted(ptr, muted) } catch (_: Throwable) {}
+        val src = nativeSourcePtr
+        if (src != 0L) {
+            try { PlayerJni.sourceSetMuted(src, muted) } catch (_: Throwable) {}
         }
     }
 

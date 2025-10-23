@@ -101,8 +101,17 @@ class WebRtcCore(private val ctx: Context) {
         SignalLevel.post(0)
         d("init: ADM & audioTrack ready, start muted")
 
-        // (временно отключено) не создаём нативный источник, чтобы не триггерить повторный JNI_OnLoad
-        playerNativeSrc = 0L
+
+        // Безопасный нативный источник (заглушка): не линкуется с WebRTC и не вызывает повторный JNI_OnLoad
+        try {
+            playerNativeSrc = com.buligin.vishnucast.player.jni.PlayerJni.createSource()
+            android.util.Log.d("VishnuJNI", "playerNativeSrc=0x${java.lang.Long.toHexString(playerNativeSrc)}")
+            com.buligin.vishnucast.player.jni.PlayerJni.sourceSetMuted(playerNativeSrc, true)
+        } catch (t: Throwable) {
+            android.util.Log.w("VishnuJNI", "createSource failed: ${t.message}")
+            playerNativeSrc = 0L
+        }
+
 
         startGuardTimer()
     }
@@ -191,8 +200,11 @@ class WebRtcCore(private val ctx: Context) {
         muted.set(mutedNow)
         try { adm.setMicrophoneMute(mutedNow) } catch (_: Throwable) {}
 
-        // JNI-вызовы выключены:
-        // if (playerNativeSrc != 0L) PlayerJni.sourceSetMuted(playerNativeSrc, mutedNow)
+        try {
+            val src = playerNativeSrc
+            if (src != 0L) com.buligin.vishnucast.player.jni.PlayerJni.sourceSetMuted(src, mutedNow)
+        } catch (_: Throwable) {}
+
 
         try { audioTrack.setEnabled(true) } catch (_: Throwable) {}
         if (mutedNow) {
@@ -633,6 +645,14 @@ class WebRtcCore(private val ctx: Context) {
         close(PcKind.MIC)
         close(PcKind.PLAYER)
         d("dispose(): both PCs closed")
+
+        val src = playerNativeSrc
+        playerNativeSrc = 0L
+        if (src != 0L) {
+            try { com.buligin.vishnucast.player.jni.PlayerJni.destroySource(src) } catch (_: Throwable) {}
+        }
+
+
     }
 
     fun setForceProbeByAlpha(alpha: Float, muted: Boolean) {
