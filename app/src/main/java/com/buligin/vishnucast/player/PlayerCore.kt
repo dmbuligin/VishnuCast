@@ -2,23 +2,21 @@ package com.buligin.vishnucast.player
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import com.google.android.exoplayer2.C
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.Player
-import com.google.android.exoplayer2.C
 import com.google.android.exoplayer2.audio.AudioAttributes
-
-
-
-
-
 
 class PlayerCore(context: Context) {
 
+    private val TAG = "VishnuExo"
     private val app: Context = context.applicationContext
+
     private val exo: ExoPlayer = ExoPlayer.Builder(app).build().apply {
         repeatMode = Player.REPEAT_MODE_OFF
         setAudioAttributes(
@@ -52,6 +50,7 @@ class PlayerCore(context: Context) {
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                Log.w(TAG, "Player error: ${error.errorCodeName} ${error.message}")
                 _isPlaying.postValue(false)
             }
         })
@@ -61,8 +60,17 @@ class PlayerCore(context: Context) {
         exo.stop()
         exo.clearMediaItems()
 
-        val mediaItems: List<MediaItem> = items.sortedBy { it.sort }.map { it.toMediaItem() }
-        exo.setMediaItems(mediaItems, startIndex.coerceIn(0, mediaItems.lastIndex.coerceAtLeast(0)), 0L)
+        val mediaItems: List<MediaItem> = items
+            .sortedBy { it.sort }
+            .mapNotNull { it.safeToMediaItem(app, TAG) }
+
+        if (mediaItems.isEmpty()) {
+            Log.w(TAG, "No playable items (filtered)")
+            return
+        }
+
+        val clampedIndex = startIndex.coerceIn(0, mediaItems.lastIndex)
+        exo.setMediaItems(mediaItems, clampedIndex, 0L)
         exo.prepare()
     }
 
@@ -74,25 +82,73 @@ class PlayerCore(context: Context) {
     fun previous() = exo.seekToPreviousMediaItem()
 
     fun currentIndex(): Int = exo.currentMediaItemIndex
+    fun setVolume() { /* keep for compat */ }
     fun setVolume01(v: Float) { exo.volume = v.coerceIn(0f, 1f) }
 
     fun release() { exo.release() }
 
-    /** Обновлять из UI таймером ~раз в 500 мс */
     fun tick() {
         _positionMs.postValue(exo.currentPosition)
         _durationMs.postValue(if (exo.duration > 0) exo.duration else 0L)
     }
+}
 
-    private fun PlaylistItem.toMediaItem(): MediaItem {
-        return MediaItem.Builder()
-            .setUri(Uri.parse(uri))
-            .setMediaId(id)
-            .setMediaMetadata(
-                com.google.android.exoplayer2.MediaMetadata.Builder()
-                    .setTitle(title)
-                    .build()
-            )
-            .build()
+data class PlaylistItem(
+    val id: String,
+    val uri: String,
+    val title: String,
+    val sort: Int = 0
+)
+
+private fun PlaylistItem.safeToMediaItem(app: Context, tag: String): MediaItem? {
+    val u = try { Uri.parse(uri) } catch (t: Throwable) {
+        Log.w(tag, "Bad URI: $uri (${t.message})"); return null
+    }
+    val scheme = (u.scheme ?: "").lowercase()
+
+    if (scheme == "http" || scheme == "https" || scheme == "file") {
+        return baseMediaItem(u)
+    }
+
+    if (scheme == "content") {
+        // Если нет persistent-разрешения, пробуем просто открыть FD на чтение (API 19+).
+        if (!hasPersistedRead(app, u) && !canOpenForRead(app, u)) {
+            Log.w(tag, "No permission to read $u — skipping")
+            return null
+        }
+        return baseMediaItem(u)
+    }
+
+    Log.w(tag, "Unsupported URI scheme '$scheme' for $uri — skipped")
+    return null
+}
+
+private fun PlaylistItem.baseMediaItem(u: Uri): MediaItem {
+    return MediaItem.Builder()
+        .setUri(u)
+        .setMediaId(id)
+        .setMediaMetadata(
+            com.google.android.exoplayer2.MediaMetadata.Builder()
+                .setTitle(title)
+                .build()
+        )
+        .build()
+}
+
+private fun hasPersistedRead(app: Context, uri: Uri): Boolean {
+    return try {
+        app.contentResolver.persistedUriPermissions.any { it.isReadPermission && it.uri == uri }
+    } catch (_: Throwable) { false }
+}
+
+private fun canOpenForRead(app: Context, uri: Uri): Boolean {
+    return try {
+        // Доступно с API 19; не требует CancellationSignal
+        app.contentResolver.openFileDescriptor(uri, "r")?.use { }
+        true
+    } catch (_: SecurityException) {
+        false
+    } catch (_: Throwable) {
+        false
     }
 }

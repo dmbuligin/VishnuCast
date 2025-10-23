@@ -3,9 +3,9 @@ package com.buligin.vishnucast.player.jni
 import org.webrtc.PeerConnectionFactory
 
 object PlayerJni {
-    init {
-        try { System.loadLibrary("vishnuplayer") } catch (_: Throwable) {}
-    }
+  //  init {
+   //     try { System.loadLibrary("vishnuplayer") } catch (_: Throwable) {}
+  //  }
 
     // Старый движок (оставляем)
     external fun createEngine(): Long

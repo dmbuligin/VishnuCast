@@ -18,8 +18,13 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import com.buligin.vishnucast.player.jni.PlayerJni
+
+
 
 class WebRtcCore(private val ctx: Context) {
+
+    @Volatile private var playerNativeSrc: Long = 0L
 
     // ==== ДОБАВЛЕНО: типы PC для совместимости с PeerManager ====
     enum class PcKind { MIC, PLAYER }
@@ -58,6 +63,7 @@ class WebRtcCore(private val ctx: Context) {
         val now = System.currentTimeMillis()
         if (now - lastVerboseAt >= everyMs) { lastVerboseAt = now; Log.d(TAG, msg) }
     }
+
 
     init {
         // Глобальная страховка: инициализируем WebRTC один раз на процесс,
@@ -99,9 +105,21 @@ class WebRtcCore(private val ctx: Context) {
         muted.set(true)
         SignalLevel.post(0)
         d("init: ADM & audioTrack ready, start muted")
+        // Нативный тонкий источник для PLAYER (создаём сейчас, подключим трек позже)
+        try {
+            playerNativeSrc = PlayerJni.createSource()
+            Log.d("VishnuJNI", "playerNativeSrc=0x${java.lang.Long.toHexString(playerNativeSrc)}")
+            // стартуем в mute: пусть источник молчит пока muted=true
+            PlayerJni.sourceSetMuted(playerNativeSrc, true)
+        } catch (t: Throwable) {
+            Log.w("VishnuJNI", "createSource failed: ${t.message}")
+            playerNativeSrc = 0L
+        }
+
 
         startGuardTimer()
     }
+
 
     private fun startGuardTimer() {
         try { guardTimer?.cancel() } catch (_: Throwable) {}
@@ -186,6 +204,11 @@ class WebRtcCore(private val ctx: Context) {
     fun setMuted(mutedNow: Boolean) {
         muted.set(mutedNow)
         try { adm.setMicrophoneMute(mutedNow) } catch (_: Throwable) {}
+
+        // Держим mute в нативном источнике синхронно с UI
+        try { if (playerNativeSrc != 0L) PlayerJni.sourceSetMuted(playerNativeSrc, mutedNow) } catch (_: Throwable) {}
+
+
         try { audioTrack.setEnabled(true) } catch (_: Throwable) {}
         if (mutedNow) {
             shownLevel01 = 0.0
@@ -463,22 +486,48 @@ class WebRtcCore(private val ctx: Context) {
         private const val TAG = "VishnuCast"
     }
 
-    /** Однократная safe-инициализация WebRTC. */
+
+    /** Однократная safe-инициализация WebRTC/ JNI (без двойного InitGlobalJniVariables). */
     private object WebRtcInit {
-        private val done = AtomicBoolean(false)
-        fun ensure(appCtx: Context) {
-            if (done.compareAndSet(false, true)) {
-                try { System.loadLibrary("jingle_peerconnection_so") } catch (_: Throwable) {}
+        @Volatile private var done = false
+
+        fun ensure(appCtx: android.content.Context) {
+            if (done) return
+            synchronized(this) {
+                if (done) return
+
+                var webrtcLoadedByNative = false
+                // 1) Пытаемся загрузить наш нативный модуль. Если он линкован с libjingle_peerconnection_so,
+                //    то внутри уже вызовется JNI_OnLoad(WebRTC) → g_jvm будет установлен.
                 try {
-                    val init = PeerConnectionFactory.InitializationOptions
-                        .builder(appCtx)
-                        .setEnableInternalTracer(false)
-                        .createInitializationOptions()
-                    PeerConnectionFactory.initialize(init)
-                } catch (_: Throwable) {}
+                    System.loadLibrary("vishnuplayer")
+                    webrtcLoadedByNative = true
+                } catch (_: Throwable) {
+                    // vishnuplayer отсутствует — пойдём по Java-пути
+                }
+
+                // 2) Если нативно WebRTC не поднялся, делаем Java-инициализацию один раз.
+                if (!webrtcLoadedByNative) {
+                    try {
+                        val init = org.webrtc.PeerConnectionFactory.InitializationOptions
+                            .builder(appCtx)
+                            .setEnableInternalTracer(false)
+                            .createInitializationOptions()
+                        org.webrtc.PeerConnectionFactory.initialize(init)
+                    } catch (_: Throwable) {
+                        // Если здесь упадёт — значит lib уже поднята, но это и есть «двойной init».
+                        // Не ретраим и не грузим другие so.
+                    }
+                }
+
+                done = true
             }
         }
     }
+
+
+
+
 
     // ======== MicLevelProbe (как и было) ========
     private class MicLevelProbe(private val ctx: Context) {
@@ -616,12 +665,23 @@ class WebRtcCore(private val ctx: Context) {
             lastEnergy = null
             lastDuration = null
         }
+
+        // Освобождение нативного источника
+        val src = playerNativeSrc
+        playerNativeSrc = 0L
+        if (src != 0L) {
+            try { PlayerJni.destroySource(src) } catch (_: Throwable) {}
+        }
+
     }
 
     /** Совместимость: общая dispose() — мягко закрываем оба. */
     fun dispose() {
         close(PcKind.MIC)
         close(PcKind.PLAYER)
+
+
+
         d("dispose(): both PCs closed")
     }
 

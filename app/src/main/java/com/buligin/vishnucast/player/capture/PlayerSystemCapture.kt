@@ -31,6 +31,7 @@ import android.media.AudioAttributes
  */
 @RequiresApi(Build.VERSION_CODES.Q)
 object PlayerSystemCapture {
+
     private const val TAG = "VishnuCapture"
 
     private const val SR = 48_000
@@ -45,6 +46,20 @@ object PlayerSystemCapture {
     @Volatile private var projection: MediaProjection? = null
     @Volatile private var record: AudioRecord? = null
     @Volatile private var recordingThread: Thread? = null
+
+    private fun hasReadAccess(ctx: android.content.Context, uri: android.net.Uri): Boolean {
+        return try {
+            ctx.contentResolver.openFileDescriptor(uri, "r")?.use { }   // просто пробуем открыть
+            true
+        } catch (_: SecurityException) {
+            false
+        } catch (_: Throwable) {
+            // другие ошибки нас сейчас не волнуют, важно не уронить процесс
+            false
+        }
+    }
+
+
 
 
     fun setNativeSourceHandle(ptr: Long) {

@@ -25,14 +25,14 @@ class App : Application() {
         super.onCreate()
 
         // 1) WebRTC: инициализация один раз на процесс (без fieldTrials)
-        try { System.loadLibrary("jingle_peerconnection_so") } catch (_: Throwable) {}
-        try {
-            val init = PeerConnectionFactory.InitializationOptions
-                .builder(applicationContext)
-                .setEnableInternalTracer(false)
-                .createInitializationOptions()
-            PeerConnectionFactory.initialize(init)
-        } catch (_: Throwable) {}
+   //     try { System.loadLibrary("jingle_peerconnection_so") } catch (_: Throwable) {}
+//        try {
+//            val init = PeerConnectionFactory.InitializationOptions
+//                .builder(applicationContext)
+//                .setEnableInternalTracer(false)
+//                .createInitializationOptions()
+//            PeerConnectionFactory.initialize(init)
+//        } catch (_: Throwable) {}
 
         // 2) Локаль приложения (до старта Activity)
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)

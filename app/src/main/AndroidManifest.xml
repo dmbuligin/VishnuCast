@@ -33,6 +33,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
 
+    <!-- Android 13+ (если вдруг читаем файлы напрямую) -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Android 12- (если fallback к READ_EXTERNAL_STORAGE) -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+
 
 
     <application
