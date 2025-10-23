@@ -18,18 +18,15 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import com.buligin.vishnucast.player.jni.PlayerJni
-
-
 
 class WebRtcCore(private val ctx: Context) {
 
     @Volatile private var playerNativeSrc: Long = 0L
 
-    // ==== ДОБАВЛЕНО: типы PC для совместимости с PeerManager ====
+    // ==== типы PC для совместимости с PeerManager ====
     enum class PcKind { MIC, PLAYER }
 
-    // Храним созданные этим классом PC по типам (только для врапперов kind-API)
+    // Храним созданные этим классом PC по типам (для kind-API)
     @Volatile private var pcMic: PeerConnection? = null
     @Volatile private var pcPlayer: PeerConnection? = null
 
@@ -64,10 +61,8 @@ class WebRtcCore(private val ctx: Context) {
         if (now - lastVerboseAt >= everyMs) { lastVerboseAt = now; Log.d(TAG, msg) }
     }
 
-
     init {
-        // Глобальная страховка: инициализируем WebRTC один раз на процесс,
-        // даже если по какой-то причине App.onCreate() не успел.
+        // Единоразовая инициализация WebRTC
         WebRtcInit.ensure(ctx.applicationContext)
 
         // ADM: VOICE_RECOGNITION, HW AEC/NS off — «золотой» профиль
@@ -81,7 +76,7 @@ class WebRtcCore(private val ctx: Context) {
             disableNetworkMonitor = true // «золотой» флаг
         }
 
-        // Аудио-только: никаких video encoder/decoder factory
+        // Аудио-только: без video encoder/decoder factory
         factory = PeerConnectionFactory.builder()
             .setOptions(options)
             .setAudioDeviceModule(adm)
@@ -105,21 +100,12 @@ class WebRtcCore(private val ctx: Context) {
         muted.set(true)
         SignalLevel.post(0)
         d("init: ADM & audioTrack ready, start muted")
-        // Нативный тонкий источник для PLAYER (создаём сейчас, подключим трек позже)
-        try {
-            playerNativeSrc = PlayerJni.createSource()
-            Log.d("VishnuJNI", "playerNativeSrc=0x${java.lang.Long.toHexString(playerNativeSrc)}")
-            // стартуем в mute: пусть источник молчит пока muted=true
-            PlayerJni.sourceSetMuted(playerNativeSrc, true)
-        } catch (t: Throwable) {
-            Log.w("VishnuJNI", "createSource failed: ${t.message}")
-            playerNativeSrc = 0L
-        }
 
+        // (временно отключено) не создаём нативный источник, чтобы не триггерить повторный JNI_OnLoad
+        playerNativeSrc = 0L
 
         startGuardTimer()
     }
-
 
     private fun startGuardTimer() {
         try { guardTimer?.cancel() } catch (_: Throwable) {}
@@ -205,9 +191,8 @@ class WebRtcCore(private val ctx: Context) {
         muted.set(mutedNow)
         try { adm.setMicrophoneMute(mutedNow) } catch (_: Throwable) {}
 
-        // Держим mute в нативном источнике синхронно с UI
-        try { if (playerNativeSrc != 0L) PlayerJni.sourceSetMuted(playerNativeSrc, mutedNow) } catch (_: Throwable) {}
-
+        // JNI-вызовы выключены:
+        // if (playerNativeSrc != 0L) PlayerJni.sourceSetMuted(playerNativeSrc, mutedNow)
 
         try { audioTrack.setEnabled(true) } catch (_: Throwable) {}
         if (mutedNow) {
@@ -242,7 +227,7 @@ class WebRtcCore(private val ctx: Context) {
         SignalLevel.post(percent)
     }
 
-    // ===== ТВОЙ last-stable метод (НЕ МЕНЯЛ) =====
+    // ===== last-stable метод =====
     fun createPeerConnection(onIce: (IceCandidate) -> Unit): PeerConnection? {
         val rtcConfig = PeerConnection.RTCConfiguration(
             listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
@@ -486,8 +471,7 @@ class WebRtcCore(private val ctx: Context) {
         private const val TAG = "VishnuCast"
     }
 
-
-    /** Однократная safe-инициализация WebRTC/ JNI (без двойного InitGlobalJniVariables). */
+    /** Однократная инициализация WebRTC (без двойного JNI_OnLoad). */
     private object WebRtcInit {
         @Volatile private var done = false
 
@@ -495,41 +479,21 @@ class WebRtcCore(private val ctx: Context) {
             if (done) return
             synchronized(this) {
                 if (done) return
-
-                var webrtcLoadedByNative = false
-                // 1) Пытаемся загрузить наш нативный модуль. Если он линкован с libjingle_peerconnection_so,
-                //    то внутри уже вызовется JNI_OnLoad(WebRTC) → g_jvm будет установлен.
                 try {
-                    System.loadLibrary("vishnuplayer")
-                    webrtcLoadedByNative = true
-                } catch (_: Throwable) {
-                    // vishnuplayer отсутствует — пойдём по Java-пути
+                    val init = org.webrtc.PeerConnectionFactory.InitializationOptions
+                        .builder(appCtx)
+                        .setEnableInternalTracer(false)
+                        .createInitializationOptions()
+                    org.webrtc.PeerConnectionFactory.initialize(init)
+                } catch (t: Throwable) {
+                    android.util.Log.w("VishnuRTC", "initialize threw: ${t.message}")
                 }
-
-                // 2) Если нативно WebRTC не поднялся, делаем Java-инициализацию один раз.
-                if (!webrtcLoadedByNative) {
-                    try {
-                        val init = org.webrtc.PeerConnectionFactory.InitializationOptions
-                            .builder(appCtx)
-                            .setEnableInternalTracer(false)
-                            .createInitializationOptions()
-                        org.webrtc.PeerConnectionFactory.initialize(init)
-                    } catch (_: Throwable) {
-                        // Если здесь упадёт — значит lib уже поднята, но это и есть «двойной init».
-                        // Не ретраим и не грузим другие so.
-                    }
-                }
-
                 done = true
             }
         }
     }
 
-
-
-
-
-    // ======== MicLevelProbe (как и было) ========
+    // ======== MicLevelProbe ========
     private class MicLevelProbe(private val ctx: Context) {
         @Volatile private var running = false
         @Volatile private var thread: Thread? = null
@@ -625,9 +589,8 @@ class WebRtcCore(private val ctx: Context) {
         fun isRunning(): Boolean = running
     }
 
-    // ==== ДОБАВЛЕНО: врапперы kind-API для PeerManager (не ломают существующий код) ====
+    // ==== врапперы kind-API для PeerManager ====
 
-    /** Создать PC по типу; внутри вызывает твой last-stable createPeerConnection(onIce). */
     fun createPeerConnection(kind: PcKind, onIce: (IceCandidate) -> Unit): PeerConnection? {
         val pc = createPeerConnection(onIce) ?: return null
         when (kind) {
@@ -637,21 +600,18 @@ class WebRtcCore(private val ctx: Context) {
         return pc
     }
 
-    /** Установить удалённый SDP по типу (использует сохранённый PC). */
     fun setRemoteSdp(kind: PcKind, remoteSdp: String, onLocalSdp: (SessionDescription) -> Unit) {
         val pc = when (kind) { PcKind.MIC -> pcMic; PcKind.PLAYER -> pcPlayer }
         if (pc == null) { w("setRemoteSdp(kind=$kind): pc is null"); return }
         setRemoteSdp(pc, remoteSdp, onLocalSdp)
     }
 
-    /** Добавить ICE кандидат по типу (использует сохранённый PC). */
     fun addIceCandidate(kind: PcKind, c: IceCandidate) {
         val pc = when (kind) { PcKind.MIC -> pcMic; PcKind.PLAYER -> pcPlayer }
         if (pc == null) { w("addIceCandidate(kind=$kind): pc is null"); return }
         addIceCandidate(pc, c)
     }
 
-    /** Закрыть PC указанного типа и сбросить ссылку (без влияния на другой PC). */
     fun close(kind: PcKind) {
         val pc = when (kind) {
             PcKind.MIC -> pcMic.also { pcMic = null }
@@ -665,28 +625,17 @@ class WebRtcCore(private val ctx: Context) {
             lastEnergy = null
             lastDuration = null
         }
-
-        // Освобождение нативного источника
-        val src = playerNativeSrc
+        // нативный источник не используем
         playerNativeSrc = 0L
-        if (src != 0L) {
-            try { PlayerJni.destroySource(src) } catch (_: Throwable) {}
-        }
-
     }
 
-    /** Совместимость: общая dispose() — мягко закрываем оба. */
     fun dispose() {
         close(PcKind.MIC)
         close(PcKind.PLAYER)
-
-
-
         d("dispose(): both PCs closed")
     }
 
-    /** Совместимость: заглушка форс-пробинга по альфе (не требуется в этой ветке). */
     fun setForceProbeByAlpha(alpha: Float, muted: Boolean) {
-        // no-op; индикатор и так работает (stats/пробник).
+        // no-op; индикатор и так работает (stats/пробник)
     }
 }

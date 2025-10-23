@@ -13,7 +13,7 @@ class VishnuServer(
     override fun openWebSocket(handshake: NanoHTTPD.IHTTPSession): WebSocket {
         // handshake ненулевой — NanoWSD сам валидирует
         Logger.d("VishnuWS", "openWebSocket on ${handshake.uri}")
-        android.util.Log.d("VishnuMix", "VishnuServer.openWebSocket: new socket uri=${handshake.uri}")
+        android.util.Log.d("VishnuWS", "VishnuServer.openWebSocket: new socket uri=${handshake.uri}")
         return SignalingSocket(appContext, handshake)
     }
 
@@ -44,10 +44,11 @@ class VishnuServer(
 
     // Удобные обёртки, чтобы управлять таймаутом
     fun launch(socketReadTimeoutMs: Int, daemon: Boolean) {
-        Logger.i("VishnuWS", "Starting VishnuServer on :$listeningPort timeout=${socketReadTimeoutMs}ms")
-        start(socketReadTimeoutMs, daemon)
+        android.util.Log.i("VishnuWS", "Starting VishnuServer on :$listeningPort timeout=${socketReadTimeoutMs}ms")
+        start(socketReadTimeoutMs, daemon) // может бросить IOException — ловим выше в сервисе
         ClientCounterStable.reset()
     }
+
 
     fun shutdown() {
         Logger.i("VishnuWS", "Stopping VishnuServer")

@@ -8,7 +8,7 @@ import android.util.Log
  */
 object Logger {
     @Volatile
-    var enabled: Boolean = false  // по умолчанию тихо
+    var enabled: Boolean = true  // по умолчанию включен
 
     inline fun d(tag: String, msg: String) {
         if (enabled) Log.d(tag, msg)

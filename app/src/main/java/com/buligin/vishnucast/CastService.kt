@@ -100,13 +100,30 @@ class CastService : Service() {
     // --- HTTP/WS ---
     private fun startHttpWsIfNeeded() {
         if (server != null) return
+
         val sp = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val port = sp.getInt(KEY_PORT, 8080).coerceIn(1, 65535)
-        server = VishnuServer(applicationContext, port).also {
-            it.launch(120_000, false)
+        var basePort = sp.getInt(KEY_PORT, 8080).coerceIn(1024, 65535)
+
+        var lastError: Throwable? = null
+        for (i in 0..9) {
+            val tryPort = (basePort + i).coerceIn(1024, 65535)
+            try {
+                val s = VishnuServer(applicationContext, tryPort)
+                s.launch(120_000, false)
+                server = s
+                sp.edit().putInt(KEY_PORT, tryPort).apply()
+                android.util.Log.i("VishnuWS", "HTTP/WS server started on :$tryPort")
+                updateNotification()
+                return
+            } catch (t: Throwable) {
+                lastError = t
+                android.util.Log.w("VishnuWS", "Port bind failed on :$tryPort — ${t.message}")
+            }
         }
-        updateNotification()
+
+        android.util.Log.e("VishnuWS", "Failed to start HTTP/WS server on ports $basePort..${basePort+9}", lastError)
     }
+
 
     // --- Mute state ---
     private fun applyMute(muted: Boolean) {
