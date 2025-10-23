@@ -52,6 +52,13 @@ import android.widget.ImageButton
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import com.buligin.vishnucast.player.PlaylistActivity
+import android.app.Activity
+import android.media.projection.MediaProjectionManager
+import com.buligin.vishnucast.player.capture.PlayerCapture
+import com.buligin.vishnucast.player.capture.PlayerSystemCapture
+
+
+
 
 
 
@@ -62,6 +69,30 @@ import com.buligin.vishnucast.update.UpdateProgressDialog
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
+
+    private val requestProjection =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+            if (res.resultCode == Activity.RESULT_OK) {
+                PlayerCapture.set(res.resultCode, res.data)
+                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    PlayerSystemCapture.start(this)
+                }
+            }
+        }
+
+    private fun requestSystemAudioCapture() {
+        if (android.os.Build.VERSION.SDK_INT < 29) return
+        if (PlayerCapture.isGranted()) {
+            PlayerSystemCapture.start(this)
+            return
+        }
+        val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        requestProjection.launch(mpm.createScreenCaptureIntent())
+    }
+
+
+
+
 
     companion object {
         private const val PREFS_NAME = "vishnucast_prefs"
@@ -340,6 +371,12 @@ class MainActivity : AppCompatActivity() {
         arrowHint.stopHint()
         hideArrowHint()
 
+        if (Build.VERSION.SDK_INT >= 29) {
+            PlayerSystemCapture.stop()
+        }
+
+
+
     }
 
     // ===== Menu =====
@@ -420,6 +457,12 @@ class MainActivity : AppCompatActivity() {
         try {
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
         } catch (_: Throwable) { /* no-op */ }
+
+        if (enable && Build.VERSION.SDK_INT >= 29) {
+            requestSystemAudioCapture()
+        }
+
+
 
         updateUiRunning(enable)
         try { btnToggle.performHapticFeedback(HapticFeedbackConstants.CONFIRM) } catch (_: Throwable) {}

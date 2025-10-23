@@ -17,6 +17,7 @@ import com.buligin.vishnucast.R
 import com.buligin.vishnucast.player.capture.PlayerCapture
 import com.buligin.vishnucast.player.capture.PlayerSystemCapture
 import android.os.Build
+import android.media.projection.MediaProjectionManager
 
 
 
@@ -105,7 +106,7 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
         projectionLauncher = activity.registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { res ->
-            PlayerCapture.onProjectionResult(res.resultCode, res.data)
+            PlayerCapture.set(res.resultCode, res.data)
             val action = onProjectionGranted
             onProjectionGranted = null
             if (PlayerCapture.isGranted()) {
@@ -284,13 +285,20 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
             return
         }
         onProjectionGranted = action
+
         try {
-            val intent = PlayerCapture.createRequestIntent(activity)
+            val intent = (activity.getSystemService(android.content.Context.MEDIA_PROJECTION_SERVICE)
+                as MediaProjectionManager).createScreenCaptureIntent()
             projectionLauncher?.launch(intent)
+
         } catch (_: Throwable) {
-            // тихо игнорируем, UI не падает
+        // тихо игнорируем, UI не падает
         }
+
+
+
     }
+
 
     private fun resetUiToDefaults() {
         tvTitle?.text = activity.getString(R.string.cast_player_title)
