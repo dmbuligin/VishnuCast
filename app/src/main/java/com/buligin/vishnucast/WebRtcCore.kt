@@ -476,6 +476,11 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
+    /** Хэндл тонкого нативного источника (0, если не создан). */
+    fun getNativeSourceHandle(): Long = playerNativeSrc
+
+
+
     companion object {
         @Volatile var LEVEL_TICK_MS: Int = 120
         @Volatile var LEVEL_RELEASE_PER_SEC: Double = 1.50

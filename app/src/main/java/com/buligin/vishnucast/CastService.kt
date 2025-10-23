@@ -27,6 +27,17 @@ class CastService : Service() {
         // Mute по умолчанию
         applyMute(true)
 
+
+        // Сообщаем захватчику аудио (Android 10+) хэндл нативного источника
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                val h = WebRtcCoreHolder.get(applicationContext).getNativeSourceHandle()
+                com.buligin.vishnucast.player.capture.PlayerSystemCapture.setNativeSourceHandle(h)
+                android.util.Log.d("VishnuJNI", "CastService: native source handle propagated: 0x${java.lang.Long.toHexString(h)}")
+            }
+        } catch (_: Throwable) { }
+
+
         isRunning = true
     }
 
