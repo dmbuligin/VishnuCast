@@ -21,6 +21,9 @@ import kotlin.math.roundToInt
 
 class WebRtcCore(private val ctx: Context) {
 
+
+
+
     @Volatile private var playerNativeSrc: Long = 0L
 
     // ==== типы PC для совместимости с PeerManager ====
@@ -29,6 +32,12 @@ class WebRtcCore(private val ctx: Context) {
     // Храним созданные этим классом PC по типам (для kind-API)
     @Volatile private var pcMic: PeerConnection? = null
     @Volatile private var pcPlayer: PeerConnection? = null
+
+
+    @Volatile private var senderMic: RtpSender? = null
+    @Volatile private var senderPlayer: RtpSender? = null
+
+
 
     private val pendingPeerCount = AtomicInteger(0)
     private var guardTimer: Timer? = null
@@ -480,6 +489,50 @@ class WebRtcCore(private val ctx: Context) {
     fun getNativeSourceHandle(): Long = playerNativeSrc
 
 
+    /** Серверная реакция на кроссфейдер: экономим трафик и порогово мьютим MIC.
+     *  alpha∈[0..1]: 0 → только MIC, 1 → только PLAYER.
+     *  Клиентский WebAudio-микс НЕ трогаем; громкость плеера крутит PlayerUiBinder/PlayerCore.
+     */
+    fun setCrossfadeAlpha(alpha: Float) {
+        val a = alpha.coerceIn(0f, 1f)
+
+        // 1) Пороговый mute микрофона, чтобы при α≈1 не фонить.
+        //    Порог можно подвинуть; сейчас 0.98/0.02.
+        if (a >= 0.98f && !muted.get()) {
+            // выключать весь микрофон не хотим, если пользователь явно Unmute включил,
+            // поэтому делаем мягко: оставляем mic unmuted, но резать отправку будем enc.active (ниже).
+        } else if (a <= 0.02f && muted.get()) {
+            // аналогично — ничего не меняем тут; mute управляется пользователем.
+        }
+
+        // 2) Экономия трафика: активируем только нужный sender на каждой PC.
+        //    На MIC-PC: при α≈0 активен MIC, при α≈1 — можно выключить (если есть PC PLAYER — он шлёт своё).
+        //    На PLAYER-PC: наоборот.
+        fun trySetSenderActive(sender: RtpSender?, active: Boolean, tag: String) {
+            if (sender == null) return
+            try {
+                val p = sender.parameters
+                val encs = p.encodings
+                if (encs != null && encs.isNotEmpty()) {
+                    if (encs[0].active == active) return
+                    encs[0].active = active
+                    val ok = sender.setParameters(p)
+                    if (LOG_ENABLED) Log.d("VishnuCast", "enc.active[$tag] -> $active ok=$ok")
+                }
+            } catch (t: Throwable) {
+                if (LOG_ENABLED) Log.w("VishnuCast", "enc.active[$tag] set failed: ${t.message}")
+            }
+        }
+
+        // MIC-канал шлём, когда α не «почти 1»
+        trySetSenderActive(senderMic, a < 0.98f, "MIC")
+        // PLAYER-канал шлём, когда α не «почти 0»
+        trySetSenderActive(senderPlayer, a > 0.02f, "PLAYER")
+    }
+
+
+
+
 
     companion object {
         @Volatile var LEVEL_TICK_MS: Int = 120
@@ -609,12 +662,22 @@ class WebRtcCore(private val ctx: Context) {
     // ==== врапперы kind-API для PeerManager ====
 
     fun createPeerConnection(kind: PcKind, onIce: (IceCandidate) -> Unit): PeerConnection? {
+
         val pc = createPeerConnection(onIce) ?: return null
         when (kind) {
-            PcKind.MIC    -> pcMic = pc
-            PcKind.PLAYER -> pcPlayer = pc
+            PcKind.MIC -> {
+                pcMic = pc
+                // первый аудио-sender этого PC
+                senderMic = try { pc.senders.firstOrNull { it.track()?.kind() == "audio" } } catch (_: Throwable) { null }
+            }
+            PcKind.PLAYER -> {
+                pcPlayer = pc
+                senderPlayer = try { pc.senders.firstOrNull { it.track()?.kind() == "audio" } } catch (_: Throwable) { null }
+            }
         }
         return pc
+
+
     }
 
     fun setRemoteSdp(kind: PcKind, remoteSdp: String, onLocalSdp: (SessionDescription) -> Unit) {

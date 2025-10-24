@@ -8,11 +8,16 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Observer
+import com.buligin.vishnucast.player.MixerState
 
 class CastService : Service() {
 
     private var server: VishnuServer? = null
     private var isFgShown: Boolean = false // флаг: уведомление реально запущено через startForeground
+
+    // NEW: observer кроссфейдера
+    private var mixObserver: Observer<Float>? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -27,7 +32,6 @@ class CastService : Service() {
         // Mute по умолчанию
         applyMute(true)
 
-
         // Сообщаем захватчику аудио (Android 10+) хэндл нативного источника
         try {
             if (android.os.Build.VERSION.SDK_INT >= 29) {
@@ -37,6 +41,15 @@ class CastService : Service() {
             }
         } catch (_: Throwable) { }
 
+        // NEW: подписка на кроссфейдер из UI → реакция сервера (экономия трафика по sender.active)
+        mixObserver = Observer { alpha ->
+            val a = (alpha ?: 0f).coerceIn(0f, 1f)
+            android.util.Log.d("VishnuMix", "CastService.observe alpha=$a muted=${getSavedMute(applicationContext)}")
+            try {
+                WebRtcCoreHolder.get(applicationContext).setCrossfadeAlpha(a)
+            } catch (_: Throwable) { }
+        }
+        MixerState.alpha01.observeForever(mixObserver!!)
 
         isRunning = true
     }
@@ -84,6 +97,12 @@ class CastService : Service() {
     }
 
     override fun onDestroy() {
+        // NEW: снять подписку, чтобы не было утечек
+        try {
+            mixObserver?.let { MixerState.alpha01.removeObserver(it) }
+        } catch (_: Throwable) { }
+        mixObserver = null
+
         isRunning = false
         try { server?.shutdown() } catch (_: Throwable) {}
         server = null
@@ -135,7 +154,6 @@ class CastService : Service() {
         android.util.Log.e("VishnuWS", "Failed to start HTTP/WS server on ports $basePort..${basePort+9}", lastError)
     }
 
-
     // --- Mute state ---
     private fun applyMute(muted: Boolean) {
         try { WebRtcCoreHolder.get(applicationContext).setMuted(muted) } catch (_: Throwable) {}
@@ -151,13 +169,6 @@ class CastService : Service() {
         }
         val piOpen = PendingIntent.getActivity(this, 0, openIntent, pendingFlags())
 
-        // Кнопка "Выход" — открывает Activity с ACTION_EXIT_NOW (без broadcast)
-//        val exitIntent = Intent(this, MainActivity::class.java).apply {
-//            action = ACTION_EXIT_NOW
-//            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
-//        }
-//        val piExit = PendingIntent.getActivity(this, 10, exitIntent, pendingFlags())
-
         val muted = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MUTED, true)
         val text = if (muted) getString(R.string.cast_stopped) else getString(R.string.cast_running)
 
@@ -166,22 +177,18 @@ class CastService : Service() {
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setContentIntent(piOpen)
-            .setOngoing(true) // делает уведомление несмахиваемым
+            .setOngoing(true)
             .setAutoCancel(false)
             .setCategory(Notification.CATEGORY_SERVICE)
-           // .addAction(0, getString(R.string.action_exit), piExit)
 
-        // Сделать показ foreground-уведомления немедленным (API 31+, совместимо через compat)
         b.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
 
         val notif = b.build()
-        // дубль страховки от некоторого OEM: NO_CLEAR
         notif.flags = notif.flags or Notification.FLAG_NO_CLEAR or Notification.FLAG_ONGOING_EVENT
         return notif
     }
 
     private fun updateNotification() {
-        // Обновляем только еслиForeground реально показан; иначе избавимся от "Cannot find enqueued record..."
         if (!isFgShown) return
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.notify(NOTIF_ID, buildRunningNotification())
@@ -212,7 +219,7 @@ class CastService : Service() {
     }
 
     companion object {
-        const val ACTION_EXIT_NOW = "com.buligin.vishnucast.action.EXIT_NOW" // интент в Activity
+        const val ACTION_EXIT_NOW = "com.buligin.vishnucast.action.EXIT_NOW"
         const val ACTION_EXIT = "com.buligin.vishnucast.action.EXIT"
 
         @Volatile var isRunning: Boolean = false
