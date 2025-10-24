@@ -135,11 +135,6 @@
   var reofferTimer = null;
   var keepAliveTimer = null;
 
-    // Не спать!!!
-  var wakeLock = null;              // Screen Wake Lock (если поддерживается)
-  var reconnectTimer = null;        // таймер автопереподключения
-  var reconnectAttempts = 0;        // счётчик экспоненциального бэкоффа
-
   // ---------- Language switches ----------
   (function initLang(){
     function updateAria(){
@@ -244,49 +239,9 @@
   function resetBuffers(){}
   function cancelReofferTimer(){ if (reofferTimer) { clearTimeout(reofferTimer); reofferTimer = null; log('Re-offer timer canceled'); } }
 
-    // Не спать!!!
-   // ---- Wake Lock (держим экран включённым, если браузер умеет) ----
-   async function requestWakeLock() {
-     try {
-       if (!('wakeLock' in navigator)) { log('WakeLock not supported'); return; }
-       if (wakeLock) return;
-       wakeLock = await navigator.wakeLock.request('screen');
-       log('WakeLock acquired');
-       wakeLock.addEventListener('release', function(){ log('WakeLock released (by system)'); wakeLock = null; });
-     } catch (e) {
-       log('WakeLock error:', e && e.message);
-       wakeLock = null;
-     }
-   }
-   function releaseWakeLock() {
-     try { if (wakeLock) { wakeLock.release(); } } catch(_) {}
-     wakeLock = null;
-   }
-
-    // ---- Автопереподключение с экспоненциальной задержкой ----
-   function cancelReconnect() { if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } }
-   function scheduleReconnect(reason) {
-     if (userStopped) return;           // пользователь сам нажал Disconnect — не лезем
-     if (state !== 'idle') return;      // уже идёт коннект/подключено
-     cancelReconnect();
-     // backoff: 0.7s, 1s, 2s, 4s, ... до 30s
-     var delay = (reconnectAttempts === 0) ? 700 : Math.min(30000, 1000 * Math.pow(2, reconnectAttempts - 1));
-     reconnectAttempts++;
-     log('Auto-reconnect in', delay, 'ms | attempt', reconnectAttempts, '| reason=', reason);
-     reconnectTimer = setTimeout(function(){
-       if (!userStopped && state === 'idle') start();
-     }, delay);
-   }
-
-
-
   // ---------- Start / Stop ----------
   function start() {
     if (state === 'connecting' || state === 'connected') return;
-
-        // Не спать!!!
-    cancelReconnect();
-    reconnectAttempts = 0;
 
     // Разблокируем аудио-д движок в рамках жеста пользователя
     try {
@@ -297,10 +252,6 @@
         log('AudioContext state:', window.__vc_ac.state);
       }
     } catch(e) { log('AudioContext error:', e); }
-
-        // Не спать!!!
-    // Попросим не гасить экран (где доступно)
-    requestWakeLock();
 
     userStopped = false;
     stopping = false;
@@ -338,14 +289,6 @@
       log('WS close code=', ev.code, 'reason=', ev.reason);
       try { if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; } } catch(_) {}
       if (!userStopped) setStatus(texts.t('ws_closed'));
-
-          // Не спать!!!
-      // Экран больше держать не нужно
-      releaseWakeLock();
-     // Если отключилось не по кнопке — попробуем аккуратно переподключиться
-      if (!manual) scheduleReconnect('unexpected stop');
-
-
       stopAll(false);
     };
 
@@ -557,10 +500,6 @@
       setBtn();
       setStatus();
       cancelReofferTimer();
-
-    // Не спать!!!
-     cancelReconnect();
-     reconnectAttempts = 0;
     };
 
     sendOffer();
@@ -604,15 +543,4 @@
   setStatus();
 
   log('Client boot. Log ON =', LOG.on);
-
-
- // Когда вкладка снова видима — если мы «уснули» и стоим в idle не по воле пользователя, пни авто-reconnect
- document.addEventListener('visibilitychange', function () {
-   if (document.visibilityState === 'visible') {
-     if (!userStopped && state === 'idle') scheduleReconnect('tab visible');
-     // После возврата на экран Wake Lock мог быть утерян системой — попросим снова
-     if (state !== 'idle') requestWakeLock();
-   }
- });
-
 })();
