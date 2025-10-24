@@ -553,10 +553,30 @@ class WebRtcCore(private val ctx: Context) {
         return null
     }
 
-    // ======== α → экономия трафика (как было) ========
     fun setCrossfadeAlpha(alpha: Float) {
-        Log.d(TAG, "setCrossfadeAlpha a=${"%.2f".format(alpha)} mic=${senderMic!=null} player=${senderPlayer!=null}")
         val a = alpha.coerceIn(0f, 1f)
+        val singleTrackMode = (senderPlayer == null || pcPlayer == null)
+        Log.d(TAG, "setCrossfadeAlpha a=${"%.2f".format(a)} mic=${senderMic!=null} player=${senderPlayer!=null} single=$singleTrackMode")
+
+        // В режиме 1 PC/1 трека НЕЛЬЗЯ выключать MIC — он несёт смешанный сигнал.
+        if (singleTrackMode) {
+            // Убедимся, что MIC всегда активен
+            try {
+                val s = senderMic ?: return
+                val p = s.parameters
+                val encs = p.encodings ?: return
+                if (encs.isNotEmpty() && encs[0].active == false) {
+                    encs[0].active = true
+                    val ok = s.setParameters(p)
+                    Log.d(TAG, "enc.active[MIC] -> true ok=$ok (single-track)")
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "force MIC active (single-track) failed: ${t.message}")
+            }
+            return // никаких выключений по α
+        }
+
+        // Двухтрекавая экономия (исторический путь): MIC↔PLAYER по порогам
         fun trySetSenderActive(sender: RtpSender?, active: Boolean, tag: String) {
             if (sender == null) return
             try {
@@ -574,6 +594,7 @@ class WebRtcCore(private val ctx: Context) {
         trySetSenderActive(senderMic,    a < 0.98f, "MIC")
         trySetSenderActive(senderPlayer, a > 0.02f, "PLAYER")
     }
+
 
     companion object {
         @Volatile var LEVEL_TICK_MS: Int = 120
