@@ -21,28 +21,26 @@ import kotlin.math.roundToInt
 
 class WebRtcCore(private val ctx: Context) {
 
+    @Volatile private var autoBindCount: Int = 0
+    private val autoBindLock = Any()
 
 
+    @Volatile private var lastCreatedSender: RtpSender? = null
 
     @Volatile private var playerNativeSrc: Long = 0L
 
-    // ==== типы PC для совместимости с PeerManager ====
     enum class PcKind { MIC, PLAYER }
 
-    // Храним созданные этим классом PC по типам (для kind-API)
     @Volatile private var pcMic: PeerConnection? = null
     @Volatile private var pcPlayer: PeerConnection? = null
 
-
+    // NEW: запоминаем senders для управления encodings[0].active
     @Volatile private var senderMic: RtpSender? = null
     @Volatile private var senderPlayer: RtpSender? = null
-
-
 
     private val pendingPeerCount = AtomicInteger(0)
     private var guardTimer: Timer? = null
 
-    // Аудио-только: без EglBase и без видео-фабрик
     private val adm: JavaAudioDeviceModule
     private val factory: PeerConnectionFactory
     private val audioSource: AudioSource
@@ -50,17 +48,14 @@ class WebRtcCore(private val ctx: Context) {
     private val connectedPeerCount = AtomicInteger(0)
     private val muted = AtomicBoolean(true)
 
-    // Источник индикатора при наличии клиентов → stats с текущего PC
     @Volatile private var statsPc: PeerConnection? = null
     private var statsTimer: Timer? = null
     @Volatile private var lastEnergy: Double? = null
     @Volatile private var lastDuration: Double? = null
     @Volatile private var shownLevel01: Double = 0.0
 
-    // Зонд микрофона для режима «нет клиентов»
     private val probe = MicLevelProbe(ctx)
 
-    // --- DIAG/LOG ---
     private fun d(msg: String) { if (LOG_ENABLED) Log.d(TAG, msg) }
     private fun w(msg: String) { if (LOG_ENABLED) Log.w(TAG, msg) }
     private var lastVerboseAt = 0L
@@ -71,10 +66,8 @@ class WebRtcCore(private val ctx: Context) {
     }
 
     init {
-        // Единоразовая инициализация WebRTC
         WebRtcInit.ensure(ctx.applicationContext)
 
-        // ADM: VOICE_RECOGNITION, HW AEC/NS off — «золотой» профиль
         adm = JavaAudioDeviceModule.builder(ctx)
             .setUseHardwareAcousticEchoCanceler(false)
             .setUseHardwareNoiseSuppressor(false)
@@ -82,16 +75,14 @@ class WebRtcCore(private val ctx: Context) {
             .createAudioDeviceModule()
 
         val options = PeerConnectionFactory.Options().apply {
-            disableNetworkMonitor = true // «золотой» флаг
+            disableNetworkMonitor = true
         }
 
-        // Аудио-только: без video encoder/decoder factory
         factory = PeerConnectionFactory.builder()
             .setOptions(options)
             .setAudioDeviceModule(adm)
             .createPeerConnectionFactory()
 
-        // Софт-флаги (AEC/NS/AGC(+2))
         val audioConstraints = MediaConstraints().apply {
             optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
             optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
@@ -104,23 +95,20 @@ class WebRtcCore(private val ctx: Context) {
         audioTrack  = factory.createAudioTrack("ARDAMSa0", audioSource)
         audioTrack.setEnabled(true)
 
-        // Стартуем в mute → «пустой поток»
         adm.setMicrophoneMute(true)
         muted.set(true)
         SignalLevel.post(0)
         d("init: ADM & audioTrack ready, start muted")
 
-
-        // Безопасный нативный источник (заглушка): не линкуется с WebRTC и не вызывает повторный JNI_OnLoad
+        // безопасная заглушка native-источника: handle создаётся, лог виден, но WebRTC не трогаем здесь
         try {
             playerNativeSrc = com.buligin.vishnucast.player.jni.PlayerJni.createSource()
-            android.util.Log.d("VishnuJNI", "playerNativeSrc=0x${java.lang.Long.toHexString(playerNativeSrc)}")
+            Log.d("VishnuJNI", "playerNativeSrc=0x${java.lang.Long.toHexString(playerNativeSrc)}")
             com.buligin.vishnucast.player.jni.PlayerJni.sourceSetMuted(playerNativeSrc, true)
         } catch (t: Throwable) {
-            android.util.Log.w("VishnuJNI", "createSource failed: ${t.message}")
+            Log.w("VishnuJNI", "createSource failed: ${t.message}")
             playerNativeSrc = 0L
         }
-
 
         startGuardTimer()
     }
@@ -182,28 +170,11 @@ class WebRtcCore(private val ctx: Context) {
         }
 
         d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
-
-        if (clients > 0) {
-            if (probeRunning) { probe.stop(); d("guard: stopped probe (clients>0)") }
-            if (!statsActive && statsPc != null) {
-                restartStatsTimer()
-                d("guard: restarted stats (clients>0)")
-            }
-        } else {
-            if (statsActive) {
-                try { statsTimer?.cancel() } catch (_: Throwable) {}
-                statsTimer = null
-                statsPc = null
-                d("guard: stopped stats (no clients)")
-            }
-            if (!probeRunning) {
-                probe.setRelease(LEVEL_RELEASE_PER_SEC)
-                probe.setTickMs(LEVEL_TICK_MS)
-                probe.start { level01 -> onExternalLevel(level01) }
-                d("guard: started probe (no clients)")
-            }
-        }
     }
+
+
+
+
 
     fun setMuted(mutedNow: Boolean) {
         muted.set(mutedNow)
@@ -213,7 +184,6 @@ class WebRtcCore(private val ctx: Context) {
             val src = playerNativeSrc
             if (src != 0L) com.buligin.vishnucast.player.jni.PlayerJni.sourceSetMuted(src, mutedNow)
         } catch (_: Throwable) {}
-
 
         try { audioTrack.setEnabled(true) } catch (_: Throwable) {}
         if (mutedNow) {
@@ -234,6 +204,12 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
+
+    /** Хэндл тонкого нативного источника (0 если не создан) */
+    fun getNativeSourceHandle(): Long = playerNativeSrc
+
+
+
     private fun onExternalLevel(level01: Double) {
         if (muted.get()) return
         val target = level01.coerceIn(0.0, 1.0)
@@ -248,7 +224,7 @@ class WebRtcCore(private val ctx: Context) {
         SignalLevel.post(percent)
     }
 
-    // ===== last-stable метод =====
+    // ===== базовый PC-конструктор =====
     fun createPeerConnection(onIce: (IceCandidate) -> Unit): PeerConnection? {
         val rtcConfig = PeerConnection.RTCConfiguration(
             listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
@@ -317,8 +293,35 @@ class WebRtcCore(private val ctx: Context) {
         val pc = factory.createPeerConnection(rtcConfig, observer) ?: return null
         createdPc = pc
 
+        // наш исходящий аудиотрек
         val sender = pc.addTrack(audioTrack, listOf("vishnu_audio_stream"))
         d("createPeerConnection: addTrack sender=${sender != null}")
+        lastCreatedSender = sender
+
+
+// --- AUTO-BIND: если вызывают универсальный createPeerConnection(..) без kind ---
+// Первый созданный PC считаем MIC, второй — PLAYER.
+// Это включает enc.active-переключение без участия SignalingSocket.
+        synchronized(autoBindLock) {
+            if (pcMic == null) {
+                pcMic = pc
+                senderMic = sender
+                Log.d(TAG, "auto-bind: MIC sender set: ${senderMic != null}")
+                autoBindCount = 1
+            } else if (pcPlayer == null) {
+                pcPlayer = pc
+                senderPlayer = sender
+                Log.d(TAG, "auto-bind: PLAYER sender set: ${senderPlayer != null}")
+                autoBindCount = 2
+            } else {
+                // уже оба есть — оставляем как есть
+                Log.d(TAG, "auto-bind: extra PC created (ignored for MIC/PLAYER binding)")
+            }
+        }
+
+
+
+
 
         pendingPeerCount.incrementAndGet()
         statsPc = pc
@@ -327,13 +330,27 @@ class WebRtcCore(private val ctx: Context) {
         return pc
     }
 
-    fun setRemoteDescription(pc: PeerConnection, sdp: SessionDescription, onSet: () -> Unit = {}) {
-        pc.setRemoteDescription(object : SdpObserver {
-            override fun onSetSuccess() { onSet() }
-            override fun onSetFailure(p0: String?) {}
-            override fun onCreateSuccess(p0: SessionDescription?) {}
-            override fun onCreateFailure(p0: String?) {}
-        }, sdp)
+    // ===== high-level API с учётом kind =====
+    fun createPeerConnection(kind: PcKind, onIce: (IceCandidate) -> Unit): PeerConnection? {
+        val pc = createPeerConnection(onIce) ?: return null
+
+        when (kind) {
+            PcKind.MIC -> {
+                pcMic = pc
+                // гарантированно привязываем тот sender, который только что вернул addTrack(...)
+                senderMic = lastCreatedSender ?: try { pc.senders.firstOrNull { it.track()?.kind() == "audio" } } catch (_: Throwable) { null }
+                Log.d(TAG, "MIC sender set: ${senderMic != null}")
+            }
+            PcKind.PLAYER -> {
+                pcPlayer = pc
+                senderPlayer = lastCreatedSender ?: try { pc.senders.firstOrNull { it.track()?.kind() == "audio" } } catch (_: Throwable) { null }
+                Log.d(TAG, "PLAYER sender set: ${senderPlayer != null}")
+            }
+        }
+        lastCreatedSender = null
+
+
+        return pc
     }
 
     fun setRemoteSdp(pc: PeerConnection, sdp: String, onLocalSdp: (SessionDescription) -> Unit) {
@@ -485,54 +502,28 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
-    /** Хэндл тонкого нативного источника (0, если не создан). */
-    fun getNativeSourceHandle(): Long = playerNativeSrc
-
-
-    /** Серверная реакция на кроссфейдер: экономим трафик и порогово мьютим MIC.
-     *  alpha∈[0..1]: 0 → только MIC, 1 → только PLAYER.
-     *  Клиентский WebAudio-микс НЕ трогаем; громкость плеера крутит PlayerUiBinder/PlayerCore.
-     */
+    // ======== Новое: реакция на кроссфейдер с экономией трафика ========
     fun setCrossfadeAlpha(alpha: Float) {
+        Log.d(TAG, "setCrossfadeAlpha a=${"%.2f".format(alpha)} mic=${senderMic!=null} player=${senderPlayer!=null}")
         val a = alpha.coerceIn(0f, 1f)
-
-        // 1) Пороговый mute микрофона, чтобы при α≈1 не фонить.
-        //    Порог можно подвинуть; сейчас 0.98/0.02.
-        if (a >= 0.98f && !muted.get()) {
-            // выключать весь микрофон не хотим, если пользователь явно Unmute включил,
-            // поэтому делаем мягко: оставляем mic unmuted, но резать отправку будем enc.active (ниже).
-        } else if (a <= 0.02f && muted.get()) {
-            // аналогично — ничего не меняем тут; mute управляется пользователем.
-        }
-
-        // 2) Экономия трафика: активируем только нужный sender на каждой PC.
-        //    На MIC-PC: при α≈0 активен MIC, при α≈1 — можно выключить (если есть PC PLAYER — он шлёт своё).
-        //    На PLAYER-PC: наоборот.
         fun trySetSenderActive(sender: RtpSender?, active: Boolean, tag: String) {
             if (sender == null) return
             try {
-                val p = sender.parameters
-                val encs = p.encodings
-                if (encs != null && encs.isNotEmpty()) {
-                    if (encs[0].active == active) return
-                    encs[0].active = active
-                    val ok = sender.setParameters(p)
-                    if (LOG_ENABLED) Log.d("VishnuCast", "enc.active[$tag] -> $active ok=$ok")
-                }
+                val params = sender.parameters
+                val encs = params.encodings
+                if (encs == null || encs.isEmpty()) return
+                if (encs[0].active == active) return
+                encs[0].active = active
+                val ok = sender.setParameters(params)
+                Log.d(TAG, "enc.active[$tag] -> $active ok=$ok")
             } catch (t: Throwable) {
-                if (LOG_ENABLED) Log.w("VishnuCast", "enc.active[$tag] set failed: ${t.message}")
+                Log.w(TAG, "trySetSenderActive[$tag] failed: ${t.message}")
             }
         }
-
-        // MIC-канал шлём, когда α не «почти 1»
-        trySetSenderActive(senderMic, a < 0.98f, "MIC")
-        // PLAYER-канал шлём, когда α не «почти 0»
+        // α≈0 → шлём MIC, гасим PLAYER; α≈1 → наоборот
+        trySetSenderActive(senderMic,    a < 0.98f, "MIC")
         trySetSenderActive(senderPlayer, a > 0.02f, "PLAYER")
     }
-
-
-
-
 
     companion object {
         @Volatile var LEVEL_TICK_MS: Int = 120
@@ -541,20 +532,18 @@ class WebRtcCore(private val ctx: Context) {
         private const val TAG = "VishnuCast"
     }
 
-    /** Однократная инициализация WebRTC (без двойного JNI_OnLoad). */
     private object WebRtcInit {
         @Volatile private var done = false
-
         fun ensure(appCtx: android.content.Context) {
             if (done) return
             synchronized(this) {
                 if (done) return
                 try {
-                    val init = org.webrtc.PeerConnectionFactory.InitializationOptions
+                    val init = PeerConnectionFactory.InitializationOptions
                         .builder(appCtx)
                         .setEnableInternalTracer(false)
                         .createInitializationOptions()
-                    org.webrtc.PeerConnectionFactory.initialize(init)
+                    PeerConnectionFactory.initialize(init)
                 } catch (t: Throwable) {
                     android.util.Log.w("VishnuRTC", "initialize threw: ${t.message}")
                 }
@@ -563,7 +552,7 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
-    // ======== MicLevelProbe ========
+    // ======== MicLevelProbe (как было) ========
     private class MicLevelProbe(private val ctx: Context) {
         @Volatile private var running = false
         @Volatile private var thread: Thread? = null
@@ -581,7 +570,7 @@ class WebRtcCore(private val ctx: Context) {
             ) == PackageManager.PERMISSION_GRANTED
             if (!hasPerm) {
                 onLevel01(0.0)
-                Log.w("VishnuCast", "MicLevelProbe: RECORD_AUDIO permission missing; probe disabled")
+                Log.w(TAG, "MicLevelProbe: RECORD_AUDIO permission missing; probe disabled")
                 return
             }
             running = true
@@ -608,7 +597,7 @@ class WebRtcCore(private val ctx: Context) {
                     } catch (_: SecurityException) {
                         running = false
                         onLevel01(0.0)
-                        Log.w("VishnuCast", "MicLevelProbe: SecurityException starting AudioRecord")
+                        Log.w(TAG, "MicLevelProbe: SecurityException starting AudioRecord")
                         return@Thread
                     }
 
@@ -659,26 +648,7 @@ class WebRtcCore(private val ctx: Context) {
         fun isRunning(): Boolean = running
     }
 
-    // ==== врапперы kind-API для PeerManager ====
-
-    fun createPeerConnection(kind: PcKind, onIce: (IceCandidate) -> Unit): PeerConnection? {
-
-        val pc = createPeerConnection(onIce) ?: return null
-        when (kind) {
-            PcKind.MIC -> {
-                pcMic = pc
-                // первый аудио-sender этого PC
-                senderMic = try { pc.senders.firstOrNull { it.track()?.kind() == "audio" } } catch (_: Throwable) { null }
-            }
-            PcKind.PLAYER -> {
-                pcPlayer = pc
-                senderPlayer = try { pc.senders.firstOrNull { it.track()?.kind() == "audio" } } catch (_: Throwable) { null }
-            }
-        }
-        return pc
-
-
-    }
+    // ===== kind-API совместимость =====
 
     fun setRemoteSdp(kind: PcKind, remoteSdp: String, onLocalSdp: (SessionDescription) -> Unit) {
         val pc = when (kind) { PcKind.MIC -> pcMic; PcKind.PLAYER -> pcPlayer }
@@ -694,8 +664,8 @@ class WebRtcCore(private val ctx: Context) {
 
     fun close(kind: PcKind) {
         val pc = when (kind) {
-            PcKind.MIC -> pcMic.also { pcMic = null }
-            PcKind.PLAYER -> pcPlayer.also { pcPlayer = null }
+            PcKind.MIC -> pcMic.also { pcMic = null; senderMic = null }
+            PcKind.PLAYER -> pcPlayer.also { pcPlayer = null; senderPlayer = null }
         }
         try { pc?.close() } catch (_: Throwable) {}
         if (statsPc === pc) {
@@ -705,7 +675,6 @@ class WebRtcCore(private val ctx: Context) {
             lastEnergy = null
             lastDuration = null
         }
-        // нативный источник не используем
         playerNativeSrc = 0L
     }
 
@@ -713,17 +682,8 @@ class WebRtcCore(private val ctx: Context) {
         close(PcKind.MIC)
         close(PcKind.PLAYER)
         d("dispose(): both PCs closed")
-
-        val src = playerNativeSrc
-        playerNativeSrc = 0L
-        if (src != 0L) {
-            try { com.buligin.vishnucast.player.jni.PlayerJni.destroySource(src) } catch (_: Throwable) {}
-        }
-
-
     }
 
-    fun setForceProbeByAlpha(alpha: Float, muted: Boolean) {
-        // no-op; индикатор и так работает (stats/пробник)
-    }
+    // совместимость c прежним API
+    fun setForceProbeByAlpha(alpha: Float, muted: Boolean) { /* no-op */ }
 }

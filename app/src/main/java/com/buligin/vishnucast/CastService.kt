@@ -116,16 +116,23 @@ class CastService : Service() {
     private fun startAsForeground(withMicType: Boolean) {
         val notif = buildRunningNotification()
         if (Build.VERSION.SDK_INT >= 29) {
-            val type = if (withMicType)
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            else
+            val type = if (withMicType) {
+                // ВАЖНО: для AudioPlaybackCapture/MediaProjection требуем оба типа
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            } else {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            }
             startForeground(NOTIF_ID, notif, type)
         } else {
             startForeground(NOTIF_ID, notif)
         }
         isFgShown = true
     }
+
+
+
+
 
     // --- HTTP/WS ---
     private fun startHttpWsIfNeeded() {
