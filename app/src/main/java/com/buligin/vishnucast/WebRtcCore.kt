@@ -21,6 +21,10 @@ import kotlin.math.roundToInt
 
 class WebRtcCore(private val ctx: Context) {
 
+    @Volatile private var micIceConnected: Boolean = false
+    @Volatile private var playerIceConnected: Boolean = false
+
+
     @Volatile private var autoBindCount: Int = 0
     private val autoBindLock = Any()
 
@@ -238,42 +242,63 @@ class WebRtcCore(private val ctx: Context) {
             override fun onIceCandidate(candidate: IceCandidate) { onIce(candidate) }
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) {}
 
+
+
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                // Определяем, какой это PC (MIC или PLAYER)
+                val isMic = (createdPc === pcMic)
                 when (state) {
                     PeerConnection.IceConnectionState.CONNECTED -> {
+                        if (isMic) micIceConnected = true else playerIceConnected = true
+
                         pendingPeerCount.updateAndGet { n -> if (n > 0) n - 1 else 0 }
                         val n = connectedPeerCount.incrementAndGet()
                         ClientCount.post(n)
 
+                        // Всегда вешаем statsPc на живой PC (этот приоритетнее)
                         statsPc = createdPc
                         lastEnergy = null; lastDuration = null
                         restartStatsTimer()
 
-                        d("PC CONNECTED: clients=$n, pending=${pendingPeerCount.get()} → stats=ON")
+                        d("PC CONNECTED (${if (isMic) "MIC" else "PLAYER"}): clients=$n, pending=${pendingPeerCount.get()} → stats=ON")
                     }
+
                     PeerConnection.IceConnectionState.CLOSED,
                     PeerConnection.IceConnectionState.FAILED,
                     PeerConnection.IceConnectionState.DISCONNECTED -> {
+                        if (isMic) micIceConnected = false else playerIceConnected = false
+
                         if (connectedPeerCount.get() > 0) {
                             val n = connectedPeerCount.decrementAndGet().coerceAtLeast(0)
                             ClientCount.post(n)
-                            if (n == 0) {
-                                try { statsTimer?.cancel() } catch (_: Throwable) {}
-                                statsTimer = null
-                                statsPc = null
-                                lastEnergy = null; lastDuration = null
-                                d("PC $state: clients=0 → stats=OFF")
+
+                            // Если текущий statsPc указывает на этот же PC — перевесим на выживший, либо выключим таймер
+                            if (statsPc === createdPc) {
+                                statsPc = pickAliveStatsPc()
+                                if (statsPc == null) {
+                                    try { statsTimer?.cancel() } catch (_: Throwable) {}
+                                    statsTimer = null
+                                    lastEnergy = null; lastDuration = null
+                                    d("PC $state (${if (isMic) "MIC" else "PLAYER"}): clients=$n → stats=OFF")
+                                } else {
+                                    // Оставляем таймер, просто статистику теперь читает другой PC
+                                    d("PC $state (${if (isMic) "MIC" else "PLAYER"}): clients=$n → stats=SWITCH")
+                                }
                             } else {
-                                d("PC $state: clients=$n → stats=KEEP")
+                                d("PC $state (${if (isMic) "MIC" else "PLAYER"}): clients=$n → stats=KEEP")
                             }
                         } else {
                             pendingPeerCount.updateAndGet { n -> if (n > 0) n - 1 else 0 }
-                            d("PC $state: pending now ${pendingPeerCount.get()}")
+                            d("PC $state (${if (isMic) "MIC" else "PLAYER"}): pending now ${pendingPeerCount.get()}")
                         }
                     }
+
                     else -> { /* no-op */ }
                 }
             }
+
+
+
 
             override fun onStandardizedIceConnectionChange(newState: PeerConnection.IceConnectionState?) {}
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {}
@@ -415,6 +440,27 @@ class WebRtcCore(private val ctx: Context) {
             schedule(object : TimerTask() {
                 override fun run() {
                     val pc = statsPc ?: return
+
+                    try {
+                        val st = pc.iceConnectionState()
+                        if (st != PeerConnection.IceConnectionState.CONNECTED) {
+                            // попробуем перевесить на живой, если есть
+                            val alt = pickAliveStatsPc()
+                            if (alt == null) {
+                                return // тихо ждём следующего тика
+                            } else {
+                                statsPc = alt
+                            }
+                        }
+                    } catch (_: Throwable) {
+                        return
+                    }
+
+
+
+
+
+
                     if (muted.get()) {
                         shownLevel01 = 0.0
                         SignalLevel.post(0)
@@ -501,6 +547,17 @@ class WebRtcCore(private val ctx: Context) {
             }, 0L, tick)
         }
     }
+
+
+    @Synchronized
+    private fun pickAliveStatsPc(): PeerConnection? {
+        // если MIC в CONNECTED — он приоритетен
+        if (micIceConnected && pcMic != null) return pcMic
+        // иначе PLAYER, если он жив
+        if (playerIceConnected && pcPlayer != null) return pcPlayer
+        return null
+    }
+
 
     // ======== Новое: реакция на кроссфейдер с экономией трафика ========
     fun setCrossfadeAlpha(alpha: Float) {
