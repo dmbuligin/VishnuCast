@@ -302,13 +302,13 @@
       handleSignal(ev.data);
     };
 
-    window.VC_startPlayerPc();
+    //window.VC_startPlayerPc();
 
   }
 
   function stopAll(manual){
 
-    window.VC_stopPlayerPc();
+    //window.VC_stopPlayerPc();
 
     try { if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; } } catch(_){}
     if (manual == null) manual = false;

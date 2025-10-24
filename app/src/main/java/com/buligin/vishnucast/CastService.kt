@@ -47,8 +47,13 @@ class CastService : Service() {
             android.util.Log.d("VishnuMix", "CastService.observe alpha=$a muted=${getSavedMute(applicationContext)}")
             try {
                 WebRtcCoreHolder.get(applicationContext).setCrossfadeAlpha(a)
+                WebRtcCoreHolder.get(applicationContext).mixSetAlpha(a)
+
+
             } catch (_: Throwable) { }
         }
+
+
         MixerState.alpha01.observeForever(mixObserver!!)
 
         isRunning = true

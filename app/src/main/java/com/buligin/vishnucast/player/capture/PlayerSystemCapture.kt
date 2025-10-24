@@ -16,6 +16,12 @@ import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import com.buligin.vishnucast.player.jni.PlayerJni
 import kotlin.concurrent.thread
+import com.buligin.vishnucast.player.PlayerPcmRing
+
+
+
+
+
 
 /**
  * Захват системного аудио (Android 10+) и подача в JNI 10мс фреймами (48k mono, s16).
@@ -187,6 +193,9 @@ object PlayerSystemCapture {
                             Log.e(TAG, "JNI sourcePushPcm failed", t)
                         }
                     }
+                    // Параллельно кладём PCM в ринг-буфер для серверного микса
+                    PlayerPcmRing.push(frame, FRAME_SAMPLES)
+
                 }
                 // перенос остатка в начало
                 if (off > 0) {

@@ -18,27 +18,35 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import com.buligin.vishnucast.player.PlayerPcmRing
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+
+
+
+
 
 class WebRtcCore(private val ctx: Context) {
 
     @Volatile private var micIceConnected: Boolean = false
     @Volatile private var playerIceConnected: Boolean = false
 
-
     @Volatile private var autoBindCount: Int = 0
     private val autoBindLock = Any()
 
-
     @Volatile private var lastCreatedSender: RtpSender? = null
-
     @Volatile private var playerNativeSrc: Long = 0L
+
+    // === MIX (server-side): α и временный буфер плеера для смешивания ===
+    @Volatile private var mixAlpha01: Float = 0f
+    private val playerTmp = ShortArray(480 * 4) // запас под 10..40мс кадров
 
     enum class PcKind { MIC, PLAYER }
 
     @Volatile private var pcMic: PeerConnection? = null
     @Volatile private var pcPlayer: PeerConnection? = null
 
-    // NEW: запоминаем senders для управления encodings[0].active
     @Volatile private var senderMic: RtpSender? = null
     @Volatile private var senderPlayer: RtpSender? = null
 
@@ -72,11 +80,61 @@ class WebRtcCore(private val ctx: Context) {
     init {
         WebRtcInit.ensure(ctx.applicationContext)
 
+        // === ADM + AudioBufferCallback: здесь делаем серверный микс MIC + PLAYER ===
         adm = JavaAudioDeviceModule.builder(ctx)
             .setUseHardwareAcousticEchoCanceler(false)
             .setUseHardwareNoiseSuppressor(false)
             .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+            // ВАЖНО: у io.github.webrtc-sdk колбэк другой: onBuffer(ByteBuffer,...): Long
+            .setAudioBufferCallback(object : JavaAudioDeviceModule.AudioBufferCallback {
+                override fun onBuffer(
+                    buffer: ByteBuffer,
+                    audioFormat: Int,
+                    channelCount: Int,
+                    sampleRate: Int,
+                    bytesRead: Int,
+                    captureTimeNs: Long
+                ): Long {
+                    // серверный микс: buffer = (1-α)*mic + α*player (PCM16, mono, 48k)
+                    val a = mixAlpha01.coerceIn(0f, 1f)
+                    if (a <= 0.0001f) return captureTimeNs // чистый микрофон — не тратимся
+                    if (channelCount != 1 || sampleRate != 48000 || bytesRead <= 0) return captureTimeNs
+
+// работаем с дубликатом и ЖЁСТКО задаём limit(bytesRead)
+// иначе asShortBuffer() может иметь limit=0 → crash
+                    val dup = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
+                    dup.position(0)
+                    dup.limit(bytesRead)
+
+// число 16-битных сэмплов
+                    val shortCount = (bytesRead shr 1)
+                    if (shortCount <= 0) return captureTimeNs
+                    if (playerTmp.size < shortCount) return captureTimeNs
+
+                    val sb = dup.asShortBuffer()
+                    if (sb.limit() < shortCount) return captureTimeNs // дополнительная защита
+
+// читаем плеер в playerTmp; недостача – нули
+                    PlayerPcmRing.popInto(playerTmp, shortCount)
+
+                    val micGain = (1.0f - a)
+                    val plGain  = a
+                    var i = 0
+                    while (i < shortCount) {
+                        val m = sb.get(i).toInt()
+                        val p = playerTmp[i].toInt()
+                        var s = (m * micGain + p * plGain).toInt()
+                        if (s >  32767) s =  32767
+                        if (s < -32768) s = -32768
+                        sb.put(i, s.toShort())
+                        i++
+                    }
+                    return captureTimeNs
+
+                }
+            })
             .createAudioDeviceModule()
+
 
         val options = PeerConnectionFactory.Options().apply {
             disableNetworkMonitor = true
@@ -104,7 +162,7 @@ class WebRtcCore(private val ctx: Context) {
         SignalLevel.post(0)
         d("init: ADM & audioTrack ready, start muted")
 
-        // безопасная заглушка native-источника: handle создаётся, лог виден, но WebRTC не трогаем здесь
+        // безопасная заглушка native-источника
         try {
             playerNativeSrc = com.buligin.vishnucast.player.jni.PlayerJni.createSource()
             Log.d("VishnuJNI", "playerNativeSrc=0x${java.lang.Long.toHexString(playerNativeSrc)}")
@@ -120,9 +178,7 @@ class WebRtcCore(private val ctx: Context) {
     private fun startGuardTimer() {
         try { guardTimer?.cancel() } catch (_: Throwable) {}
         guardTimer = Timer("vc-guard", true).apply {
-            schedule(object : TimerTask() {
-                override fun run() { enforceRoutingConsistency() }
-            }, 2000L, 2000L)
+            schedule(object : TimerTask() { override fun run() { enforceRoutingConsistency() } }, 2000L, 2000L)
         }
     }
 
@@ -137,17 +193,14 @@ class WebRtcCore(private val ctx: Context) {
 
         if (isMuted) {
             if (probeRunning) { probe.stop(); d("guard: stopped probe (muted)") }
-
             if (clients == 0 && statsActive) {
                 try { statsTimer?.cancel() } catch (_: Throwable) {}
-                statsTimer = null
-                statsPc = null
+                statsTimer = null; statsPc = null
                 d("guard: stopped stats (muted & no clients)")
             } else if (clients > 0 && !statsActive && statsPc != null) {
                 restartStatsTimer()
                 d("guard: restarted stats (muted & clients>0)")
             }
-
             d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
             return
         }
@@ -161,8 +214,7 @@ class WebRtcCore(private val ctx: Context) {
         } else {
             if (statsActive) {
                 try { statsTimer?.cancel() } catch (_: Throwable) {}
-                statsTimer = null
-                statsPc = null
+                statsTimer = null; statsPc = null
                 d("guard: stopped stats (no clients)")
             }
             if (!probeRunning) {
@@ -172,29 +224,22 @@ class WebRtcCore(private val ctx: Context) {
                 d("guard: started probe (no clients)")
             }
         }
-
         d("guard: hb muted=$isMuted clients=$clients pending=$pending probe=$probeRunning stats=$statsActive")
     }
-
-
-
-
 
     fun setMuted(mutedNow: Boolean) {
         muted.set(mutedNow)
         try { adm.setMicrophoneMute(mutedNow) } catch (_: Throwable) {}
-
         try {
             val src = playerNativeSrc
             if (src != 0L) com.buligin.vishnucast.player.jni.PlayerJni.sourceSetMuted(src, mutedNow)
         } catch (_: Throwable) {}
-
         try { audioTrack.setEnabled(true) } catch (_: Throwable) {}
+
         if (mutedNow) {
             shownLevel01 = 0.0
             SignalLevel.post(0)
-            lastEnergy = null
-            lastDuration = null
+            lastEnergy = null; lastDuration = null
             probe.stop()
             d("setMuted: ON → level=0, probe stop")
         } else {
@@ -208,11 +253,13 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
-
     /** Хэндл тонкого нативного источника (0 если не создан) */
     fun getNativeSourceHandle(): Long = playerNativeSrc
 
-
+    /** Альфа для серверного микса (0..1). */
+    fun mixSetAlpha(alpha: Float) {
+        mixAlpha01 = alpha.coerceIn(0f, 1f)
+    }
 
     private fun onExternalLevel(level01: Double) {
         if (muted.get()) return
@@ -242,10 +289,7 @@ class WebRtcCore(private val ctx: Context) {
             override fun onIceCandidate(candidate: IceCandidate) { onIce(candidate) }
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) {}
 
-
-
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
-                // Определяем, какой это PC (MIC или PLAYER)
                 val isMic = (createdPc === pcMic)
                 when (state) {
                     PeerConnection.IceConnectionState.CONNECTED -> {
@@ -255,24 +299,19 @@ class WebRtcCore(private val ctx: Context) {
                         val n = connectedPeerCount.incrementAndGet()
                         ClientCount.post(n)
 
-                        // Всегда вешаем statsPc на живой PC (этот приоритетнее)
                         statsPc = createdPc
                         lastEnergy = null; lastDuration = null
                         restartStatsTimer()
 
                         d("PC CONNECTED (${if (isMic) "MIC" else "PLAYER"}): clients=$n, pending=${pendingPeerCount.get()} → stats=ON")
                     }
-
                     PeerConnection.IceConnectionState.CLOSED,
                     PeerConnection.IceConnectionState.FAILED,
                     PeerConnection.IceConnectionState.DISCONNECTED -> {
                         if (isMic) micIceConnected = false else playerIceConnected = false
-
                         if (connectedPeerCount.get() > 0) {
                             val n = connectedPeerCount.decrementAndGet().coerceAtLeast(0)
                             ClientCount.post(n)
-
-                            // Если текущий statsPc указывает на этот же PC — перевесим на выживший, либо выключим таймер
                             if (statsPc === createdPc) {
                                 statsPc = pickAliveStatsPc()
                                 if (statsPc == null) {
@@ -281,7 +320,6 @@ class WebRtcCore(private val ctx: Context) {
                                     lastEnergy = null; lastDuration = null
                                     d("PC $state (${if (isMic) "MIC" else "PLAYER"}): clients=$n → stats=OFF")
                                 } else {
-                                    // Оставляем таймер, просто статистику теперь читает другой PC
                                     d("PC $state (${if (isMic) "MIC" else "PLAYER"}): clients=$n → stats=SWITCH")
                                 }
                             } else {
@@ -292,13 +330,9 @@ class WebRtcCore(private val ctx: Context) {
                             d("PC $state (${if (isMic) "MIC" else "PLAYER"}): pending now ${pendingPeerCount.get()}")
                         }
                     }
-
                     else -> { /* no-op */ }
                 }
             }
-
-
-
 
             override fun onStandardizedIceConnectionChange(newState: PeerConnection.IceConnectionState?) {}
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {}
@@ -318,15 +352,10 @@ class WebRtcCore(private val ctx: Context) {
         val pc = factory.createPeerConnection(rtcConfig, observer) ?: return null
         createdPc = pc
 
-        // наш исходящий аудиотрек
         val sender = pc.addTrack(audioTrack, listOf("vishnu_audio_stream"))
         d("createPeerConnection: addTrack sender=${sender != null}")
         lastCreatedSender = sender
 
-
-// --- AUTO-BIND: если вызывают универсальный createPeerConnection(..) без kind ---
-// Первый созданный PC считаем MIC, второй — PLAYER.
-// Это включает enc.active-переключение без участия SignalingSocket.
         synchronized(autoBindLock) {
             if (pcMic == null) {
                 pcMic = pc
@@ -339,30 +368,22 @@ class WebRtcCore(private val ctx: Context) {
                 Log.d(TAG, "auto-bind: PLAYER sender set: ${senderPlayer != null}")
                 autoBindCount = 2
             } else {
-                // уже оба есть — оставляем как есть
                 Log.d(TAG, "auto-bind: extra PC created (ignored for MIC/PLAYER binding)")
             }
         }
 
-
-
-
-
         pendingPeerCount.incrementAndGet()
         statsPc = pc
         d("createPeerConnection: pending += 1; waiting CONNECTED to start stats")
-
         return pc
     }
 
-    // ===== high-level API с учётом kind =====
+    // ===== kind API (для совместимости маршрутизации) =====
     fun createPeerConnection(kind: PcKind, onIce: (IceCandidate) -> Unit): PeerConnection? {
         val pc = createPeerConnection(onIce) ?: return null
-
         when (kind) {
             PcKind.MIC -> {
                 pcMic = pc
-                // гарантированно привязываем тот sender, который только что вернул addTrack(...)
                 senderMic = lastCreatedSender ?: try { pc.senders.firstOrNull { it.track()?.kind() == "audio" } } catch (_: Throwable) { null }
                 Log.d(TAG, "MIC sender set: ${senderMic != null}")
             }
@@ -373,8 +394,6 @@ class WebRtcCore(private val ctx: Context) {
             }
         }
         lastCreatedSender = null
-
-
         return pc
     }
 
@@ -423,8 +442,7 @@ class WebRtcCore(private val ctx: Context) {
         probe.setTickMs(LEVEL_TICK_MS)
     }
 
-    @Synchronized
-    private fun restartStatsTimer() {
+    @Synchronized private fun restartStatsTimer() {
         try { statsTimer?.cancel() } catch (_: Throwable) {}
         statsTimer = null
         if (statsPc == null) { d("restartStatsTimer: statsPc is null"); return }
@@ -440,26 +458,13 @@ class WebRtcCore(private val ctx: Context) {
             schedule(object : TimerTask() {
                 override fun run() {
                     val pc = statsPc ?: return
-
                     try {
                         val st = pc.iceConnectionState()
                         if (st != PeerConnection.IceConnectionState.CONNECTED) {
-                            // попробуем перевесить на живой, если есть
-                            val alt = pickAliveStatsPc()
-                            if (alt == null) {
-                                return // тихо ждём следующего тика
-                            } else {
-                                statsPc = alt
-                            }
+                            val alt = pickAliveStatsPc() ?: return
+                            statsPc = alt
                         }
-                    } catch (_: Throwable) {
-                        return
-                    }
-
-
-
-
-
+                    } catch (_: Throwable) { return }
 
                     if (muted.get()) {
                         shownLevel01 = 0.0
@@ -508,26 +513,19 @@ class WebRtcCore(private val ctx: Context) {
                                 }
                                 instLevel01 = lv
                             } else {
-                                val prevE = lastEnergy
-                                val prevD = lastDuration
-                                lastEnergy = energy
-                                lastDuration = dur
-
+                                val prevE = lastEnergy; val prevD = lastDuration
+                                lastEnergy = energy;    lastDuration = dur
                                 if (prevE != null && prevD != null) {
                                     val dE = max(0.0, energy!! - prevE)
                                     val dD = max(1e-9, dur!! - prevD)
                                     var p = dE / dD
                                     p = min(1.0, max(0.0, p))
                                     instLevel01 = p
-                                } else {
-                                    instLevel01 = null
-                                }
+                                } else instLevel01 = null
                             }
 
-                            maybeVerbose(
-                                "stats(real): hasOut=$sawOutbound hasSrc=$sawMediaSource inst=" +
-                                    (instLevel01?.let { "%.2f".format(it) } ?: "null")
-                            )
+                            maybeVerbose("stats(real): hasOut=$sawOutbound hasSrc=$sawMediaSource inst=" +
+                                (instLevel01?.let { "%.2f".format(it) } ?: "null"))
 
                             val target = (instLevel01 ?: 0.0).coerceIn(0.0, 1.0)
                             if (target > shownLevel01) {
@@ -548,18 +546,14 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
-
     @Synchronized
     private fun pickAliveStatsPc(): PeerConnection? {
-        // если MIC в CONNECTED — он приоритетен
         if (micIceConnected && pcMic != null) return pcMic
-        // иначе PLAYER, если он жив
         if (playerIceConnected && pcPlayer != null) return pcPlayer
         return null
     }
 
-
-    // ======== Новое: реакция на кроссфейдер с экономией трафика ========
+    // ======== α → экономия трафика (как было) ========
     fun setCrossfadeAlpha(alpha: Float) {
         Log.d(TAG, "setCrossfadeAlpha a=${"%.2f".format(alpha)} mic=${senderMic!=null} player=${senderPlayer!=null}")
         val a = alpha.coerceIn(0f, 1f)
@@ -567,8 +561,8 @@ class WebRtcCore(private val ctx: Context) {
             if (sender == null) return
             try {
                 val params = sender.parameters
-                val encs = params.encodings
-                if (encs == null || encs.isEmpty()) return
+                val encs = params.encodings ?: return
+                if (encs.isEmpty()) return
                 if (encs[0].active == active) return
                 encs[0].active = active
                 val ok = sender.setParameters(params)
@@ -577,7 +571,6 @@ class WebRtcCore(private val ctx: Context) {
                 Log.w(TAG, "trySetSenderActive[$tag] failed: ${t.message}")
             }
         }
-        // α≈0 → шлём MIC, гасим PLAYER; α≈1 → наоборот
         trySetSenderActive(senderMic,    a < 0.98f, "MIC")
         trySetSenderActive(senderPlayer, a > 0.02f, "PLAYER")
     }
@@ -609,7 +602,7 @@ class WebRtcCore(private val ctx: Context) {
         }
     }
 
-    // ======== MicLevelProbe (как было) ========
+    // ===== MicLevelProbe (как было) =====
     private class MicLevelProbe(private val ctx: Context) {
         @Volatile private var running = false
         @Volatile private var thread: Thread? = null
@@ -639,7 +632,6 @@ class WebRtcCore(private val ctx: Context) {
                     val fmt = AudioFormat.ENCODING_PCM_16BIT
                     val minBuf = AudioRecord.getMinBufferSize(rate, chCfg, fmt)
                     val bufSize = max(minBuf * 2, 960 * 10)
-
                     try {
                         ar = AudioRecord(
                             MediaRecorder.AudioSource.VOICE_RECOGNITION,
@@ -684,7 +676,6 @@ class WebRtcCore(private val ctx: Context) {
                             shown = max(0.0, shown - decay)
                             if (shown < inst) shown = inst
                         }
-
                         onLevel01(shown)
                     }
                 } catch (_: Throwable) {
@@ -701,12 +692,10 @@ class WebRtcCore(private val ctx: Context) {
             thread = null
             shown = 0.0
         }
-
         fun isRunning(): Boolean = running
     }
 
     // ===== kind-API совместимость =====
-
     fun setRemoteSdp(kind: PcKind, remoteSdp: String, onLocalSdp: (SessionDescription) -> Unit) {
         val pc = when (kind) { PcKind.MIC -> pcMic; PcKind.PLAYER -> pcPlayer }
         if (pc == null) { w("setRemoteSdp(kind=$kind): pc is null"); return }
