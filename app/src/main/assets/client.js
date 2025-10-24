@@ -301,9 +301,14 @@
       log('WS message len=', (''+ev.data).length);
       handleSignal(ev.data);
     };
+
+    window.VC_startPlayerPc();
+
   }
 
   function stopAll(manual){
+
+    window.VC_stopPlayerPc();
 
     try { if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; } } catch(_){}
     if (manual == null) manual = false;
@@ -542,5 +547,97 @@
   setBtn();
   setStatus();
 
+// === VishnuCast: второй PC (PLAYER) по кнопке Connect ===
+(function(){
+  if (window.VC_player_patched) return;
+  window.VC_player_patched = true;
+
+  var ws2 = null, pc2 = null;
+
+  function makeWsUrl(path){
+    try {
+      var proto = (location.protocol === 'https:') ? 'wss://' : 'ws://';
+      return proto + location.host + path;
+    } catch(_){ return path; }
+  }
+
+  window.VC_startPlayerPc = function(){
+    if (ws2 || pc2) return; // уже запущен
+    try { ws2 = new WebSocket(makeWsUrl('/ws_player')); } catch(e) {
+      console.log('[VishnuCast] WS_PLAYER open failed:', e && e.message); ws2=null; return;
+    }
+
+    ws2.onopen = function(){
+      try {
+        pc2 = new RTCPeerConnection({ iceServers: [] });
+
+        // принимаем только аудио
+        try { pc2.addTransceiver('audio', { direction: 'recvonly' }); } catch(_){}
+
+        // ICE → серверу
+        pc2.onicecandidate = function(ev){
+          if (!ev.candidate || !ws2 || ws2.readyState !== 1) return;
+          try {
+            ws2.send(JSON.stringify({ type:'ice', candidate:{
+              candidate: ev.candidate.candidate,
+              sdpMid: ev.candidate.sdpMid,
+              sdpMLineIndex: ev.candidate.sdpMLineIndex
+            }}));
+          } catch(_){}
+        };
+
+        // ontrack — опционально подключаем ко второму <audio id="audio_player">
+        pc2.ontrack = function(ev){
+          var tag = document.getElementById('audio_player');
+          if (tag) {
+            try { tag.srcObject = new MediaStream([ev.track]); tag.play && tag.play().catch(()=>{}); } catch(_){}
+          }
+          console.log('[VishnuCast] PLAYER ontrack');
+        };
+
+        pc2.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false })
+          .then(function(ofr){ return pc2.setLocalDescription(ofr); })
+          .then(function(){
+            if (!ws2 || ws2.readyState !== 1) return;
+            ws2.send(JSON.stringify({ type: pc2.localDescription.type, sdp: pc2.localDescription.sdp }));
+            console.log('[VishnuCast] PLAYER offer sent, len=', (pc2.localDescription.sdp||'').length);
+          })
+          .catch(function(e){ console.log('[VishnuCast] PLAYER offer error:', e && e.message); });
+      } catch(e) {
+        console.log('[VishnuCast] PLAYER setup failed:', e && e.message);
+      }
+    };
+
+    // Ответы/ICE
+    ws2.onmessage = function(ev){
+      var msg = ev.data; try { msg = JSON.parse(msg); } catch(_){}
+      if (msg && msg.type === 'answer' && msg.sdp) {
+        pc2 && pc2.setRemoteDescription({ type:'answer', sdp: msg.sdp }).catch(function(e){
+          console.log('[VishnuCast] PLAYER setRemoteDescription error:', e && e.message);
+        });
+        return;
+      }
+      if (msg && (msg.type === 'ice' || msg.candidate)) {
+        var c = msg.candidate && msg.candidate.candidate ? msg.candidate : msg;
+        try { pc2 && pc2.addIceCandidate(new RTCIceCandidate(c)); } catch(e){
+          console.log('[VishnuCast] PLAYER addIceCandidate error:', e && e.message);
+        }
+      }
+    };
+
+    ws2.onclose = function(){ try { pc2 && pc2.close(); } catch(_){}
+      pc2=null; ws2=null; console.log('[VishnuCast] WS_PLAYER closed'); };
+    ws2.onerror = function(e){ console.log('[VishnuCast] WS_PLAYER error:', e); };
+  };
+
+  window.VC_stopPlayerPc = function(){
+    try { if (ws2 && ws2.readyState === 1) ws2.close(); } catch(_){}
+    ws2=null;
+    try { if (pc2) pc2.close(); } catch(_){}
+    pc2=null;
+  };
+  })();
+
   log('Client boot. Log ON =', LOG.on);
+
 })();
