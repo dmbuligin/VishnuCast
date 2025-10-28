@@ -259,6 +259,7 @@ class WebRtcCore(private val ctx: Context) {
     /** Альфа для серверного микса (0..1). */
     fun mixSetAlpha(alpha: Float) {
         mixAlpha01 = alpha.coerceIn(0f, 1f)
+        Log.d("VishnuMix", "mixSetAlpha a=${"%.2f".format(mixAlpha01)}")
     }
 
     private fun onExternalLevel(level01: Double) {
@@ -600,7 +601,7 @@ class WebRtcCore(private val ctx: Context) {
         @Volatile var LEVEL_TICK_MS: Int = 120
         @Volatile var LEVEL_RELEASE_PER_SEC: Double = 1.50
         @Volatile var LOG_ENABLED: Boolean = true
-        private const val TAG = "VishnuCast"
+        private const val TAG = "VishnuRTC"
     }
 
     private object WebRtcInit {

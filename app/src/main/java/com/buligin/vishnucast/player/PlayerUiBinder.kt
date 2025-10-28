@@ -115,7 +115,7 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                     try {
                         if (player.isPlaying.value != true) {
-                            android.util.Log.d("VishnuCapture", "replay after projection")
+                            android.util.Log.d("VishnuMix", "replay after projection")
                             player.play()
                         }
                     } catch (_: Throwable) {}

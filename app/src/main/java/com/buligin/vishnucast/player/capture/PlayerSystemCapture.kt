@@ -33,7 +33,7 @@ import com.buligin.vishnucast.player.PlayerPcmRing
 @RequiresApi(Build.VERSION_CODES.Q)
 object PlayerSystemCapture {
 
-    private const val TAG = "VishnuCapture"
+    private const val TAG = "VishnuMix"
 
     private const val SR = 48_000
     private const val CH = AudioFormat.CHANNEL_IN_MONO

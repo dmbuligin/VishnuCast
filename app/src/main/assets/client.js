@@ -2,6 +2,34 @@
 (function () {
   'use strict';
 
+// --- optional Screen Wake Lock (best-effort) ---
+var __vc_wakeLock = null;
+async function vc_requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator && navigator.wakeLock.request) {
+      __vc_wakeLock = await navigator.wakeLock.request('screen');
+      LOG.log('WakeLock acquired');
+      __vc_wakeLock.addEventListener('release', function(){ LOG.log('WakeLock released'); });
+    }
+  } catch (e) { LOG.log('WakeLock error:', e && e.message); }
+}
+async function vc_releaseWakeLock() {
+  try { if (__vc_wakeLock) { await __vc_wakeLock.release(); __vc_wakeLock = null; } } catch(_) {}
+}
+document.addEventListener('visibilitychange', function(){
+  // На возвращении в окно — поднимем аудио ещё раз
+  try {
+    var a = document.getElementById('audio');
+    if (a && document.visibilityState === 'visible') { a.play && a.play().catch(()=>{}); }
+  } catch(_){}
+});
+
+
+
+
+
+
+
   // ---------- logger (opt-in) ----------
   var LOG = (function(){
     var on = false;
@@ -258,6 +286,7 @@
     state = 'connecting';
     setBtn();
     setStatus();
+    vc_requestWakeLock();
 
     var url = makeWsUrl();
     try {
@@ -309,7 +338,7 @@
   function stopAll(manual){
 
     //window.VC_stopPlayerPc();
-
+    vc_releaseWakeLock();
     try { if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; } } catch(_){}
     if (manual == null) manual = false;
     if (stopping) return;
