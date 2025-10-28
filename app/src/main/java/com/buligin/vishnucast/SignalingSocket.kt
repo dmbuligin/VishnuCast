@@ -14,7 +14,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Глобальный холдер единственного WebRtcCore на процесс */
 object WebRtcCoreHolder {
-    @Volatile private var instance: WebRtcCore? = null
+    @Volatile
+    private var instance: WebRtcCore? = null
 
     fun get(ctx: android.content.Context): WebRtcCore {
         instance?.let { return it }
@@ -24,6 +25,7 @@ object WebRtcCoreHolder {
             instance = core
             return core
         }
+
     }
 
     fun closeAndClear() = synchronized(this) {
@@ -33,16 +35,26 @@ object WebRtcCoreHolder {
             try {
                 // Порядок важен: сперва пытаемся вызвать close(), если это наш WebRtcCore
                 inst.javaClass.getMethod("close").invoke(inst)
-            } catch (_: Throwable) {
-                try {
-                    // Для WebRTC-объектов (PeerConnection/Factory/Source/Track) корректно dispose()
-                    inst.javaClass.getMethod("dispose").invoke(inst)
-                } catch (_: Throwable) { /* no-op */ }
+            } catch (_: Throwable) { /* no-op */
+            }
+            try {
+                // Если WebRTC-сущности (PeerConnectionFactory/Source/Track) есть → dispose
+                inst.javaClass.getMethod("dispose").invoke(inst)
+            } catch (_: Throwable) { /* no-op */
             }
         }
         instance = null
     }
+
+
+    /** Реинициализация WebRtcCore после получения разрешения на микрофон */
+    fun reinitializeAudio(ctx: android.content.Context) = synchronized(this) {
+        closeAndClear()
+        // Пересоздаём WebRtcCore с уже полученным разрешением
+        instance = WebRtcCore(ctx.applicationContext)
+    }
 }
+
 
 /** Устойчивый счётчик клиентов (живёт в процессе) */
 object ClientCounterStable {
