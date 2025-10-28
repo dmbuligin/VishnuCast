@@ -131,18 +131,27 @@ class MainActivity : AppCompatActivity() {
                 return@registerForActivityResult
             }
 
-            // Разрешение выдано впервые → пересобираем аудиостек без убийства процесса.
+            // Разрешение выдано впервые → реинициализируем WebRtcCore с новым разрешением.
+
+// 1) Реинициализируем WebRtcCore
+            try {
+                WebRtcCoreHolder.reinitializeAudio(applicationContext)
+            } catch (_: Throwable) { /* no-op */ }
+
+// 2) Перезапускаем сервис
             try {
                 val stop = Intent(this, CastService::class.java).setAction(CastService.ACTION_STOP)
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(stop) else startService(stop)
             } catch (_: Throwable) { /* no-op */ }
 
-            // Небольшая задержка, чтобы сервис успел сняться, затем — заново поднять.
+// 3) Задержка для корректной остановки
             Handler(Looper.getMainLooper()).postDelayed({
                 CastService.ensureStarted(applicationContext)
                 if (pendingUnmute) setMicEnabled(true)
                 pendingUnmute = false
             }, 200)
+
+
         }
 
 
