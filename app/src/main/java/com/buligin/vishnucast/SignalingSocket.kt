@@ -36,6 +36,14 @@ object WebRtcCoreHolder {
         }
         instance = null
     }
+
+
+    /** Реинициализация WebRtcCore после получения разрешения на микрофон */
+    fun reinitializeAudio(ctx: android.content.Context) = synchronized(this) {
+        closeAndClear()
+        // Пересоздаём WebRtcCore с уже полученным разрешением
+        instance = WebRtcCore(ctx.applicationContext)
+    }
 }
 
 /** Устойчивый счётчик клиентов (живёт в процессе) */
