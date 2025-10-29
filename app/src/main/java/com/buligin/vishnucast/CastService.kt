@@ -10,8 +10,19 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Observer
 import com.buligin.vishnucast.player.MixerState
+import android.os.SystemClock
+import androidx.media.session.MediaButtonReceiver
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
+
+
+
+
 
 class CastService : Service() {
+
+    private var mediaSession: MediaSessionCompat? = null
+
 
     private var server: VishnuServer? = null
     private var isFgShown: Boolean = false // флаг: уведомление реально запущено через startForeground
@@ -86,6 +97,59 @@ class CastService : Service() {
         return START_NOT_STICKY
     }
 
+
+    private fun ensureMediaSession() {
+        if (mediaSession != null) return
+        mediaSession = MediaSessionCompat(this, "VishnuMix").apply {
+            // Управление медиа-кнопками (нам не критично, но повышает «вес» сессии)
+            setFlags(
+                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
+                    MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
+            // Токен можно пробросить в нотификацию позже, если понадобится
+            isActive = true
+            setPlaybackState(
+                PlaybackStateCompat.Builder()
+                    .setActions(
+                        PlaybackStateCompat.ACTION_PLAY or
+                            PlaybackStateCompat.ACTION_PAUSE or
+                            PlaybackStateCompat.ACTION_PLAY_PAUSE
+                    )
+                    // Ставим состояние PLAYING сразу — это ключевой «якорь» для системы
+                    .setState(
+                        PlaybackStateCompat.STATE_PLAYING,
+                        PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
+                        1.0f,
+                        SystemClock.elapsedRealtime()
+                    )
+                    .build()
+            )
+        }
+    }
+
+    // Если захочешь менять состояние по кнопке UI — можно вызывать эти методы
+    private fun setMediaSessionPlaying(isPlaying: Boolean) {
+        mediaSession?.also { ms ->
+            val state = PlaybackStateCompat.Builder()
+                .setActions(
+                    PlaybackStateCompat.ACTION_PLAY or
+                        PlaybackStateCompat.ACTION_PAUSE or
+                        PlaybackStateCompat.ACTION_PLAY_PAUSE
+                )
+                .setState(
+                    if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
+                    PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
+                    if (isPlaying) 1.0f else 0.0f,
+                    SystemClock.elapsedRealtime()
+                )
+                .build()
+            ms.setPlaybackState(state)
+            ms.isActive = true
+        }
+    }
+
+
+
     private fun performExit() {
         // 1) Глушим микрофон
         applyMute(true)
@@ -112,6 +176,9 @@ class CastService : Service() {
         try { server?.shutdown() } catch (_: Throwable) {}
         server = null
         try { WebRtcCoreHolder.closeAndClear() } catch (_: Throwable) {}
+
+        mediaSession?.release()
+        mediaSession = null
         super.onDestroy()
     }
 
@@ -121,17 +188,20 @@ class CastService : Service() {
     private fun startAsForeground(withMicType: Boolean) {
         val notif = buildRunningNotification()
         if (Build.VERSION.SDK_INT >= 29) {
-            val type = if (withMicType) {
-                // ВАЖНО: для AudioPlaybackCapture/MediaProjection требуем оба типа
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            }
+            // ВАЖНО: добавляем MEDIA_PLAYBACK всегда, чтобы ExoPlayer не ставился на паузу в фоне/при гашении экрана
+            val type =
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
+                    (ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) or
+                    (ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+
             startForeground(NOTIF_ID, notif, type)
         } else {
             startForeground(NOTIF_ID, notif)
         }
+        ensureMediaSession()
+        isFgShown = true
+
+
         isFgShown = true
     }
 

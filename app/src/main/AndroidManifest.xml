@@ -12,6 +12,11 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+        tools:targetApi="34" />
+
+
     <!-- Типы FGS на Android 14 (targetSdk 34) -->
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"
@@ -82,8 +87,8 @@
         <service
             android:name=".CastService"
             android:exported="false"
-            android:foregroundServiceType="dataSync|microphone|mediaProjection"
-            android:stopWithTask="false" />
+            android:foregroundServiceType="microphone|mediaProjection|mediaPlayback"/>
+
 
 
         <provider

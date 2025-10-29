@@ -211,6 +211,7 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
 
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+
                 val running = PlayerSystemCapture.isRunning()
                 val playing = (player.isPlaying.value == true)
 

@@ -22,11 +22,15 @@ class PlayerCore(context: Context) {
         setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC) // не трогаем ваш тип
                 .build(),
-            /* handleAudioFocus = */ true
+            /* handleAudioFocus = */ false                 // <-- отключаем авто-паузу по фокусу
         )
+        setHandleAudioBecomingNoisy(false)                 // <-- не ставить паузу при "noisy"
+        setWakeMode(C.WAKE_MODE_LOCAL)                     // <-- держать wake при погашенном экране
     }
+
+
 
     private val _isPlaying = MutableLiveData(false)
     val isPlaying: LiveData<Boolean> = _isPlaying
@@ -74,8 +78,15 @@ class PlayerCore(context: Context) {
         exo.prepare()
     }
 
-    fun play() = exo.play()
-    fun pause() = exo.pause()
+    fun play() {
+        Log.w(TAG, "play() called", Throwable("who-called-play"))    // ВРЕМЕННО
+        exo.play()
+    }
+
+    fun pause() {
+        Log.w(TAG, "pause() called", Throwable("who-called-pause"))  // ВРЕМЕННО: покажет стек вызова
+        exo.pause()
+    }
     fun toggle() { if (exo.isPlaying) pause() else play() }
     fun seekTo(ms: Long) = exo.seekTo(ms.coerceAtLeast(0L))
     fun next() = exo.seekToNextMediaItem()
