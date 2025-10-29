@@ -198,35 +198,10 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
             tvDur?.text = formatMs(d)
         })
 
-// Реагируем на кроссфейдер: при α>0.02 держим системный захват, при α<=0.02 — гасим
+// Захват системой больше НЕ привязываем к alpha: исключаем ложные stop() при уходе в фон
         MixerState.alpha01.observe(activity, Observer { a ->
             val alpha = (a ?: 0f).coerceIn(0f, 1f)
-
-            // ВРЕМЕННО: проверяем, что приходит alpha и текущее состояние плеера/захвата
-           // val running = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-           //     com.buligin.vishnucast.player.capture.PlayerSystemCapture.isRunning()
-          //  else
-            //    false
-//            android.util.Log.d("VishnuMix", "alpha tick a=$alpha playing=${player.isPlaying.value} running=$running")
-
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-
-                val running = PlayerSystemCapture.isRunning()
-                val playing = (player.isPlaying.value == true)
-
-                if (alpha > 0.02f && playing) {
-                    // нужен захват (если ещё не запущен — стартуем)
-                    if (!running) {
-                        try { PlayerSystemCapture.start(activity) } catch (_: Throwable) {}
-                    }
-                } else {
-                    // не нужен — гасим (если был запущен)
-                    if (running) {
-                        try { PlayerSystemCapture.stop() } catch (_: Throwable) {}
-                    }
-                }
-            }
+            // no-op: микширование α выполняется на сервере; MediaProjection не трогаем здесь
         })
 
 
