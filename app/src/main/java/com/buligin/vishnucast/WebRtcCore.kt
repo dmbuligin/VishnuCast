@@ -23,11 +23,45 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 
-
-
-
-
 class WebRtcCore(private val ctx: Context) {
+
+    companion object {
+        @Volatile var LEVEL_TICK_MS: Int = 120
+        @Volatile var LEVEL_RELEASE_PER_SEC: Double = 1.50
+        @Volatile var LOG_ENABLED: Boolean = true
+        private const val TAG = "VishnuRTC"
+
+        // === VishnuMix: tuning knobs (можно крутить) ===
+        private const val MIX_APM_EC = false    // googEchoCancellation
+        private const val MIX_APM_NS = false    // googNoiseSuppression
+        private const val MIX_APM_AGC1 = false  // googAutoGainControl
+        private const val MIX_APM_AGC2 = false  // googAutoGainControl2
+        private const val MIX_APM_HPF = false   // googHighpassFilter
+
+        // Пытаемся выключить «голосовой» источник. UNPROCESSED даст минимум вмешательств,
+        // если недоступен — VOICE_COMMUNICATION, как более нейтральный, чем VOICE_RECOGNITION.
+        private const val ADM_PREFER_UNPROCESSED = true
+
+        // Headroom перед клипом и мягкий клипер (для атак/баса):
+        private const val MIX_HEADROOM = 0.85f    // 0.80..0.92
+        private const val MIX_SOFTCLIP = true
+
+        // Opus/SDP
+        private const val OPUS_MAX_BITRATE_BPS = 128_000  // 96_000..160_000 (моно)
+        private const val OPUS_SET_PTIME_20MS = true
+        private const val OPUS_DISABLE_FEC = true
+        private const val OPUS_DISABLE_CBR = true
+        private const val OPUS_DISABLE_DTX = true
+
+
+        // === VishnuMix · audio constants (do not change behavior) ===
+        private const val SAMPLE_RATE_HZ = 48_000
+        private const val FRAME_10MS_SAMPLES = SAMPLE_RATE_HZ / 100
+        // ^ FRAME_10MS_SAMPLES пока не используем повсеместно, оставлен для будущих «размагичиваний» 480.
+
+
+
+    }
 
     @Volatile private var micIceConnected: Boolean = false
     @Volatile private var playerIceConnected: Boolean = false
@@ -40,7 +74,7 @@ class WebRtcCore(private val ctx: Context) {
 
     // === MIX (server-side): α и временный буфер плеера для смешивания ===
     @Volatile private var mixAlpha01: Float = 0f
-    private val playerTmp = ShortArray(480 * 4) // запас под 10..40мс кадров
+    private val playerTmp = ShortArray(FRAME_10MS_SAMPLES * 4) // запас под 10..40мс кадров
 
     enum class PcKind { MIC, PLAYER }
 
@@ -84,7 +118,13 @@ class WebRtcCore(private val ctx: Context) {
         adm = JavaAudioDeviceModule.builder(ctx)
             .setUseHardwareAcousticEchoCanceler(false)
             .setUseHardwareNoiseSuppressor(false)
-            .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+
+            .setAudioSource(
+                if (ADM_PREFER_UNPROCESSED) MediaRecorder.AudioSource.UNPROCESSED
+                else MediaRecorder.AudioSource.VOICE_COMMUNICATION
+            )
+
+
             // ВАЖНО: у io.github.webrtc-sdk колбэк другой: onBuffer(ByteBuffer,...): Long
             .setAudioBufferCallback(object : JavaAudioDeviceModule.AudioBufferCallback {
                 override fun onBuffer(
@@ -98,7 +138,7 @@ class WebRtcCore(private val ctx: Context) {
                     // серверный микс: buffer = (1-α)*mic + α*player (PCM16, mono, 48k)
                     val a = mixAlpha01.coerceIn(0f, 1f)
                     if (a <= 0.0001f) return captureTimeNs // чистый микрофон — не тратимся
-                    if (channelCount != 1 || sampleRate != 48000 || bytesRead <= 0) return captureTimeNs
+                    if  (channelCount != 1 || sampleRate != SAMPLE_RATE_HZ || bytesRead <= 0) return captureTimeNs
 
 // работаем с дубликатом и ЖЁСТКО задаём limit(bytesRead)
 // иначе asShortBuffer() может иметь limit=0 → crash
@@ -123,10 +163,20 @@ class WebRtcCore(private val ctx: Context) {
                     while (i < shortCount) {
                         val m = sb.get(i).toInt()
                         val p = playerTmp[i].toInt()
-                        var s = (m * micGain + p * plGain).toInt()
-                        if (s >  32767) s =  32767
-                        if (s < -32768) s = -32768
+
+                        var s = ((m * micGain + p * plGain) * MIX_HEADROOM).toInt()
+                        if (MIX_SOFTCLIP) {
+                            // Быстрый мягкий клипер: s' = tanh(s/scale) * scale (scale≈32767)
+                            // Чтобы не тянуть kotlin.math.tanh в горячий цикл, используем быстрый аппрокс-клип:
+                            if (s >  29491) s = 29491 + ((s - 29491) shr 2)   // ~ -2.5 dBFS knee
+                            if (s < -29492) s = -29492 + ((s + 29492) shr 2)
+                        } else {
+                            if (s >  32767) s =  32767
+                            if (s < -32768) s = -32768
+                        }
                         sb.put(i, s.toShort())
+
+
                         i++
                     }
                     return captureTimeNs
@@ -146,11 +196,11 @@ class WebRtcCore(private val ctx: Context) {
             .createPeerConnectionFactory()
 
         val audioConstraints = MediaConstraints().apply {
-            optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl2", "true"))
-            optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+            optional.add(MediaConstraints.KeyValuePair("googEchoCancellation", MIX_APM_EC.toString()))
+            optional.add(MediaConstraints.KeyValuePair("googNoiseSuppression", MIX_APM_NS.toString()))
+            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl", MIX_APM_AGC1.toString()))
+            optional.add(MediaConstraints.KeyValuePair("googAutoGainControl2", MIX_APM_AGC2.toString()))
+            optional.add(MediaConstraints.KeyValuePair("googHighpassFilter", MIX_APM_HPF.toString()))
         }
 
         audioSource = factory.createAudioSource(audioConstraints)
@@ -354,6 +404,17 @@ class WebRtcCore(private val ctx: Context) {
         createdPc = pc
 
         val sender = pc.addTrack(audioTrack, listOf("vishnu_audio_stream"))
+        try {
+            val p = sender?.parameters
+            val encs = p?.encodings
+            if (p != null && !encs.isNullOrEmpty()) {
+                encs[0].maxBitrateBps = OPUS_MAX_BITRATE_BPS
+                val ok = sender.setParameters(p)
+                Log.d(TAG, "sender.setParameters maxBitrate=${OPUS_MAX_BITRATE_BPS} ok=$ok")
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "set maxBitrate failed: ${t.message}")
+        }
         d("createPeerConnection: addTrack sender=${sender != null}")
         lastCreatedSender = sender
 
@@ -416,12 +477,80 @@ class WebRtcCore(private val ctx: Context) {
         pc.createAnswer(object : SdpObserver {
             override fun onCreateSuccess(desc: SessionDescription?) {
                 if (desc != null) {
+
+                    val tuned = try {
+                        var sdp = desc.description ?: ""
+
+                        // 1) Поставим ptime:20 (если его ещё нет)
+                        if (OPUS_SET_PTIME_20MS && !sdp.contains("a=ptime:")) {
+                            // Найдём строку "m=audio ..." и вставим сразу ПОСЛЕ неё "a=ptime:20"
+                            val reMAudio = Regex("(?m)^m=audio .*$")
+                            val m = reMAudio.find(sdp)
+                            if (m != null) {
+                                val insertPos = m.range.last + 1 // позиция после конца строки
+                                sdp = sdp.substring(0, insertPos) + "\r\na=ptime:20" + sdp.substring(insertPos)
+                            }
+                        }
+
+                        // 2) Пропатчим fmtp для именно opus-пейлоада (найдём его payload type по rtpmap)
+                        //    a=rtpmap:111 opus/48000[/N]
+                        val reOpusRtpmap = Regex("""(?m)^a=rtpmap:(\d+)\s+opus/""")
+                        val rtpmapMatch = reOpusRtpmap.find(sdp)
+                        if (rtpmapMatch != null) {
+                            val opusPt = rtpmapMatch.groupValues[1] // payload type, обычно 111
+
+                            // Ищем fmtp для этого payload-а: a=fmtp:<pt> params...
+                            val reFmtpExact = Regex("""(?m)^a=fmtp:${opusPt}\s+([^\r\n]+)""")
+                            val fmtpMatch = reFmtpExact.find(sdp)
+
+                            fun rewriteFmtpParams(params: String): String {
+                                var kv = params
+
+                                fun put(k: String, v: String) {
+                                    val reKey = Regex("""(?:(?<=^)|(?<=;))\s*${k}=""")
+                                    kv = if (reKey.containsMatchIn(kv)) {
+                                        kv.replace(Regex("""(${k}=)[^;]+"""), "$1$v")
+                                    } else {
+                                        if (kv.isBlank()) "$k=$v" else "$kv;${k}=$v"
+                                    }
+                                }
+
+                                if (OPUS_DISABLE_FEC) put("useinbandfec","0")
+                                if (OPUS_DISABLE_CBR) put("cbr","0")
+                                if (OPUS_DISABLE_DTX) put("usedtx","0")
+                                if (OPUS_MAX_BITRATE_BPS > 0) put("maxaveragebitrate", OPUS_MAX_BITRATE_BPS.toString())
+
+                                return kv
+                            }
+
+                            sdp = if (fmtpMatch != null) {
+                                val oldParams = fmtpMatch.groupValues[1]
+                                val newParams = rewriteFmtpParams(oldParams)
+                                sdp.replaceRange(fmtpMatch.range, "a=fmtp:$opusPt $newParams")
+                            } else {
+                                // fmtp для opus ещё не было — добавим новую строку рядом с rtpmap
+                                val insertPos = rtpmapMatch.range.last + 1
+                                val newParams = rewriteFmtpParams("")
+                                sdp.substring(0, insertPos) +
+                                    "\r\na=fmtp:$opusPt $newParams" +
+                                    sdp.substring(insertPos)
+                            }
+                        }
+
+                        SessionDescription(desc.type, sdp)
+                    } catch (_: Throwable) { desc }
+
+// ВАЖНО: используем tuned при onSetSuccess/onLocalSdp
                     pc.setLocalDescription(object : SdpObserver {
-                        override fun onSetSuccess() { onLocalSdp(desc) }
+                        override fun onSetSuccess() { onLocalSdp(tuned) }
                         override fun onSetFailure(p0: String?) {}
                         override fun onCreateSuccess(p0: SessionDescription?) {}
                         override fun onCreateFailure(p0: String?) {}
-                    }, desc)
+                    }, tuned)
+
+
+
+
                 }
             }
             override fun onCreateFailure(p0: String?) {}
@@ -597,13 +726,6 @@ class WebRtcCore(private val ctx: Context) {
     }
 
 
-    companion object {
-        @Volatile var LEVEL_TICK_MS: Int = 120
-        @Volatile var LEVEL_RELEASE_PER_SEC: Double = 1.50
-        @Volatile var LOG_ENABLED: Boolean = true
-        private const val TAG = "VishnuRTC"
-    }
-
     private object WebRtcInit {
         @Volatile private var done = false
         fun ensure(appCtx: android.content.Context) {
@@ -649,7 +771,7 @@ class WebRtcCore(private val ctx: Context) {
             thread = Thread({
                 var ar: AudioRecord? = null
                 try {
-                    val rate = 48000
+                    val rate = SAMPLE_RATE_HZ
                     val chCfg = AudioFormat.CHANNEL_IN_MONO
                     val fmt = AudioFormat.ENCODING_PCM_16BIT
                     val minBuf = AudioRecord.getMinBufferSize(rate, chCfg, fmt)
