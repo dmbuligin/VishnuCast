@@ -17,18 +17,24 @@ class PlayerCore(context: Context) {
     private val TAG = "VishnuExo"
     private val app: Context = context.applicationContext
 
-    private val exo: ExoPlayer = ExoPlayer.Builder(app).build().apply {
-        repeatMode = Player.REPEAT_MODE_OFF
-        setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC) // не трогаем ваш тип
-                .build(),
-            /* handleAudioFocus = */ false                 // <-- отключаем авто-паузу по фокусу
-        )
-        setHandleAudioBecomingNoisy(false)                 // <-- не ставить паузу при "noisy"
-        setWakeMode(C.WAKE_MODE_LOCAL)                     // <-- держать wake при погашенном экране
-    }
+    private val exo: ExoPlayer = ExoPlayer.Builder(app)
+        .setRenderersFactory(VishnuRenderersFactory(app))
+        .build().apply {
+            repeatMode = Player.REPEAT_MODE_OFF
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build(),
+                /* handleAudioFocus = */ false
+            )
+            setHandleAudioBecomingNoisy(false)
+            setWakeMode(C.WAKE_MODE_LOCAL)
+
+            // По умолчанию динамик НЕ воспроизводит (глотаем), но можно включить в рантайме
+            RingTapAudioProcessor.setPassThrough(false)
+        }
+
 
 
 
