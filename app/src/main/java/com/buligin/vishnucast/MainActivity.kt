@@ -377,14 +377,11 @@ class MainActivity : AppCompatActivity() {
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         arrowHint.stopHint()
         hideArrowHint()
-
-        if (Build.VERSION.SDK_INT >= 29) {
-            PlayerSystemCapture.stop()
-        }
-
-
-
+        // НЕ трогаем PlayerSystemCapture здесь:
+        // оставляем системный аудиозахват работать в фоне,
+        // иначе при сворачивании/гашении экрана поток плеера обрывается.
     }
+
 
     // ===== Menu =====
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
