@@ -56,7 +56,8 @@ object PlayerSystemCapture {
 
     /** Старт захвата. Все ранние выходы логируются. */
     fun start(activity: Activity) {
-        Log.d(TAG, "start() requested")
+    //    Log.d(TAG, "start() requested")
+        Log.w(TAG, "start() requested", Throwable("who-called-start"))
 
         // Защита от повторного старта
         if (recordingThread != null) {
@@ -211,7 +212,9 @@ object PlayerSystemCapture {
 
     /** Остановить чтение/запись и остановить MediaProjection (без уничтожения JNI-источника). */
     fun stop() {
-        Log.d(TAG, "stop() requested")
+    //    Log.d(TAG, "stop() requested")
+        Log.w(TAG, "stop() requested", Throwable("who-called-stop"))
+
         try { recordingThread?.interrupt() } catch (_: Throwable) {}
         try { recordingThread?.join(200) } catch (_: Throwable) {}
         recordingThread = null
@@ -231,7 +234,9 @@ object PlayerSystemCapture {
 
     /** Полный релиз. JNI-источник не трогаем — его уничтожает WebRtcCore. */
     fun release() {
-        Log.d(TAG, "release() requested")
+     //   Log.d(TAG, "release() requested")
+        Log.w(TAG, "release() requested", Throwable("who-called-release"))
+
         stop()
         nativeSourcePtr = 0L
     }

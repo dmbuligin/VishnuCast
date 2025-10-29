@@ -216,9 +216,11 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
 
     private fun releaseSystemCaptureIfQ() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            android.util.Log.w("VishnuMix", "releaseSystemCaptureIfQ() -> PlayerSystemCapture.release()", Throwable("ui-release"))
             try { PlayerSystemCapture.release() } catch (_: Throwable) {}
         }
     }
+
 
 
     override fun onStateChanged(source: androidx.lifecycle.LifecycleOwner, event: Lifecycle.Event) {
@@ -248,9 +250,11 @@ class PlayerUiBinder(private val activity: AppCompatActivity) : LifecycleEventOb
     }
     private fun stopSystemCaptureIfQ() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            android.util.Log.w("VishnuMix", "stopSystemCaptureIfQ() -> PlayerSystemCapture.stop()", Throwable("ui-stop"))
             try { PlayerSystemCapture.stop() } catch (_: Throwable) {}
         }
     }
+
 
 
 
