@@ -21,10 +21,10 @@ class VishnuRenderersFactory(context: Context) : DefaultRenderersFactory(context
     ): AudioSink {
         val processors: Array<AudioProcessor> = arrayOf(RingTapAudioProcessor())
         return DefaultAudioSink.Builder(context)
-            .setEnableFloatOutput(enableFloatOutput)
+            .setEnableFloatOutput(false)                 // <-- ВСЕГДА 16-бит PCM
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-            // Не трогаем offload — для совместимости со старыми/разными версиями ExoPlayer
             .setAudioProcessors(processors)
             .build()
     }
 }
+

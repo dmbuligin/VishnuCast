@@ -32,7 +32,7 @@ class PlayerCore(context: Context) {
             setWakeMode(C.WAKE_MODE_LOCAL)
 
             // По умолчанию динамик НЕ воспроизводит (глотаем), но можно включить в рантайме
-            RingTapAudioProcessor.setPassThrough(false)
+            RingTapAudioProcessor.setPassThrough(enabled = true)
         }
 
 

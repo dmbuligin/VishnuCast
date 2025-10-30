@@ -154,8 +154,12 @@ class WebRtcCore(private val ctx: Context) {
                     val sb = dup.asShortBuffer()
                     if (sb.limit() < shortCount) return captureTimeNs // дополнительная защита
 
-// читаем плеер в playerTmp; недостача – нули
-                    PlayerPcmRing.popInto(playerTmp, shortCount)
+
+
+                    // читаем плеер в playerTmp; недостача – нули
+                    val got = PlayerPcmRing.popInto(playerTmp, shortCount)
+                    if (got != shortCount) Log.d("VishnuMix", "player underrun ${shortCount - got} samples")
+
 
                     val micGain = (1.0f - a)
                     val plGain  = a

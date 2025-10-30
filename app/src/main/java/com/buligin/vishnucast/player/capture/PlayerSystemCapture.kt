@@ -59,6 +59,12 @@ object PlayerSystemCapture {
     //    Log.d(TAG, "start() requested")
         Log.w(TAG, "start() requested", Throwable("who-called-start"))
 
+
+        if (isRunning()) {
+            Log.d(TAG, "start() ignored — already running")
+            return
+        }
+
         // Защита от повторного старта
         if (recordingThread != null) {
             Log.d(TAG, "already running; skip")
@@ -214,6 +220,12 @@ object PlayerSystemCapture {
     fun stop() {
     //    Log.d(TAG, "stop() requested")
         Log.w(TAG, "stop() requested", Throwable("who-called-stop"))
+
+
+        if (!isRunning()) {
+            Log.d(TAG, "stop() ignored — not running")
+            return
+        }
 
         try { recordingThread?.interrupt() } catch (_: Throwable) {}
         try { recordingThread?.join(200) } catch (_: Throwable) {}

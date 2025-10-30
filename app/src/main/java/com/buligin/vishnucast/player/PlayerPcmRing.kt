@@ -10,18 +10,25 @@ object PlayerPcmRing {
     private val wr = AtomicInteger(0)
     private val rd = AtomicInteger(0)
 
-    /** Пишем фрейм (mono 48k). Излишки перетрутся по кругу. */
+    /** Back-compat: запись с offset=0 */
     fun push(frame: ShortArray, samples: Int) {
-        val n = min(samples, frame.size)
+        push(frame, samples, 0)
+    }
+
+    /** Пишем подмассив [frame[offset .. offset+samples)] в ринг. */
+    fun push(frame: ShortArray, samples: Int, offset: Int) {
+        val n = min(samples, frame.size - offset)
+        if (n <= 0) return
         var p = wr.get()
         var i = 0
+        var idx = offset
         while (i < n) {
-            buf[p] = frame[i]
+            buf[p] = frame[idx]
             p++; if (p >= CAP_SAMPLES) p = 0
-            i++
+            i++; idx++
         }
         wr.set(p)
-        // если слишком далеко убежали — подтягиваем rd ближе к хвосту
+        // подтягиваем rd, если почти догнали хвост — оставляем запас 10 мс
         val lag = distance(rd.get(), wr.get())
         if (lag > CAP_SAMPLES - 480) {
             rd.set((wr.get() + CAP_SAMPLES - 480) % CAP_SAMPLES)

@@ -462,9 +462,9 @@ class MainActivity : AppCompatActivity() {
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
         } catch (_: Throwable) { /* no-op */ }
 
-        if (enable && Build.VERSION.SDK_INT >= 29) {
-            requestSystemAudioCapture()
-        }
+     //   if (enable && Build.VERSION.SDK_INT >= 29) {
+     //       requestSystemAudioCapture()
+     //   }
 
 
 
