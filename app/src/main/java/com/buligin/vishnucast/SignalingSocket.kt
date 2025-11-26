@@ -31,17 +31,7 @@ object WebRtcCoreHolder {
     fun closeAndClear() = synchronized(this) {
         val inst = instance
         if (inst != null) {
-            // Без прямой ссылки на WebRtcCore.close() — чтобы не ловить Unresolved reference
-            try {
-                // Порядок важен: сперва пытаемся вызвать close(), если это наш WebRtcCore
-                inst.javaClass.getMethod("close").invoke(inst)
-            } catch (_: Throwable) { /* no-op */
-            }
-            try {
-                // Если WebRTC-сущности (PeerConnectionFactory/Source/Track) есть → dispose
-                inst.javaClass.getMethod("dispose").invoke(inst)
-            } catch (_: Throwable) { /* no-op */
-            }
+            try { inst.close() } catch (_: Throwable) {}
         }
         instance = null
     }

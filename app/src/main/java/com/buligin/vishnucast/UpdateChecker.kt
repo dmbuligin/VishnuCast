@@ -65,13 +65,23 @@ object UpdateChecker {
             setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "VishnuCast/${BuildConfig.VERSION_NAME} (Android ${Build.VERSION.RELEASE})")
         }
-        conn.inputStream.use { ins ->
-            BufferedReader(InputStreamReader(ins)).use { br ->
-                val sb = StringBuilder()
-                var line: String?
-                while (br.readLine().also { line = it } != null) sb.append(line).append('\n')
-                return sb.toString()
+        return try {
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val body = stream?.use { ins ->
+                BufferedReader(InputStreamReader(ins)).use { br ->
+                    val sb = StringBuilder()
+                    var line: String?
+                    while (br.readLine().also { line = it } != null) sb.append(line).append('\n')
+                    sb.toString()
+                }
+            } ?: ""
+            if (code !in 200..299) {
+                throw IllegalStateException("HTTP $code: ${body.take(200)}")
             }
+            body
+        } finally {
+            conn.disconnect()
         }
     }
 

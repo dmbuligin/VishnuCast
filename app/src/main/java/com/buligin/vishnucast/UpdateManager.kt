@@ -43,6 +43,8 @@ object UpdateManager {
 
     private var job: Job? = null
     private var downloadId: Long = -1L
+    private var downloadFile: File? = null
+    private var dmContext: Context? = null
 
     /**
      * Начать скачивание APK.
@@ -53,12 +55,15 @@ object UpdateManager {
         cancel() // на всякий
         _state.value = State.Idle
 
+        dmContext = ctx.applicationContext
+
         val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
 
         // Каталог внутри "Downloads" нашего приложения (стабильно для FileProvider)
         val destDir = ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: ctx.filesDir
         destDir.mkdirs()
         val outFile = File(destDir, fileName)
+        downloadFile = outFile
         if (outFile.exists()) outFile.delete()
 
         val uri = Uri.parse(url)
@@ -124,8 +129,7 @@ object UpdateManager {
     }
 
     fun cancel() {
-        job?.cancel()
-        job = null
+        cleanupDownload(removeFromDm = true, deleteFile = true)
         _state.value = State.Idle
     }
 
@@ -338,7 +342,29 @@ object UpdateManager {
 
     private fun fail(msg: String): Boolean {
         Log.e(TAG, msg)
+        cleanupDownload(removeFromDm = true, deleteFile = true)
         _state.value = State.Failed(msg)
         return false
+    }
+
+    private fun cleanupDownload(removeFromDm: Boolean, deleteFile: Boolean) {
+        job?.cancel()
+        job = null
+
+        val ctx = dmContext
+        if (removeFromDm && downloadId >= 0 && ctx != null) {
+            runCatching {
+                val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                dm.remove(downloadId)
+            }
+        }
+
+        if (deleteFile) {
+            runCatching { downloadFile?.takeIf { it.exists() }?.delete() }
+        }
+
+        downloadId = -1L
+        downloadFile = null
+        dmContext = null
     }
 }
