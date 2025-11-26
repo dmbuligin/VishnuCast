@@ -24,6 +24,7 @@ import kotlin.math.sqrt
 class WebRtcCore(private val ctx: Context) {
 
     private val pendingPeerCount = AtomicInteger(0)
+    private val closed = AtomicBoolean(false)
     private var guardTimer: Timer? = null
 
     // Аудио-только: без EglBase и без видео-фабрик
@@ -96,6 +97,24 @@ class WebRtcCore(private val ctx: Context) {
         d("init: ADM & audioTrack ready, start muted")
 
         startGuardTimer()
+    }
+
+    fun close() {
+        if (!closed.compareAndSet(false, true)) return
+
+        try { guardTimer?.cancel() } catch (_: Throwable) {}
+        guardTimer = null
+
+        try { statsTimer?.cancel() } catch (_: Throwable) {}
+        statsTimer = null
+        statsPc = null
+
+        probe.stop()
+
+        try { audioTrack.dispose() } catch (_: Throwable) {}
+        try { audioSource.dispose() } catch (_: Throwable) {}
+        try { factory.dispose() } catch (_: Throwable) {}
+        try { adm.release() } catch (_: Throwable) {}
     }
 
     private fun startGuardTimer() {
