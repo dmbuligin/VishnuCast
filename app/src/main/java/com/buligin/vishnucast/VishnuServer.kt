@@ -32,7 +32,15 @@ class VishnuServer(
             "/apple-touch-icon.png" -> asset("apple-touch-icon.png", "image/png")
             "/favicon.png" -> asset("favicon.png", "image/png")
 
-            else               -> newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Not found")
+            // Частые пути проверки подключений (Captive Portal). Отдаём страницу сразу,
+            // чтобы ОС открыла встроенный браузер/"требуется действие сети".
+            "/generate_204", "/gen_204", "/hotspot-detect.html", "/connecttest.txt", "/ncsi.txt" ->
+                asset("index.html", "text/html; charset=utf-8")
+
+            // Любые другие пути — мягкий редирект на корень, чтобы клиент всегда видел портал
+            else -> newFixedLengthResponse(Status.REDIRECT, "text/plain", "").apply {
+                addHeader("Location", "/")
+            }
         }
     }
 
